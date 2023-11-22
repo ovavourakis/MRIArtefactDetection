@@ -1,4 +1,6 @@
-# How to Set Up
+# Getting Started
+
+## Setting Up
 
 0. Make sure you have `git` and `Docker` installed on your system.
 1. Clone this repository to your preferred location.
@@ -9,6 +11,8 @@
    ``` bash
    docker build -t artefacts MRIArtefactDetection/setup/ 
    ```
+
+## Running Inference
 
 Now, to run inferences on your own data, you have to mount tha data, as well as the model code + inference scripts (this repository) into the container like so:
 
