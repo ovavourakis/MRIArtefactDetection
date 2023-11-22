@@ -28,10 +28,10 @@ Be sure to replace `PATH/TO/DATA` with wherever you keep your data on your syste
 Because this is a bit much too write every time, you might want to consider setting up an `alias` for this long command in your shell. For example:
 
 ```
-echo "alias artefact=docker container run --mount type=bind,source="./MRIArtefactDetection",target=/root/artefacts_detection \
+echo "alias artefact='docker container run --mount type=bind,source="./MRIArtefactDetection",target=/root/artefacts_detection \
                       --mount type=bind,source="PATH/TO/DATA",target=/root/artefacts_detection/production/data \
                       -w /root/artefacts_detection/production \
-                      -it artefacts" >> ~/.bashrc \
+                      -it artefacts'" >> ~/.bashrc \
 && source ~/.bashrc
 ```
 
