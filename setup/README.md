@@ -25,8 +25,20 @@ docker container run --mount type=bind,source="./MRIArtefactDetection",target=/r
 
 Be sure to replace `PATH/TO/DATA` with wherever you keep your data on your system (the top-level folder).
 
-This will start up the container. Switch to to `production` directory and run your inference script on your data.
+Because this is a bit much too write every time, you might want to consider setting up an `alias` for this long command in your shell. For example:
 
 ```
-cd ~/artefacts_detection/production && python my_inference_script.py
+echo "alias artefact=docker container run --mount type=bind,source="./MRIArtefactDetection",target=/root/artefacts_detection \
+                      --mount type=bind,source="PATH/TO/DATA",target=/root/artefacts_detection/production/data \
+                      -w /root/artefacts_detection/production \
+                      -it artefacts" >> ~/.bashrc \
+&& source ~/.bashrc
+```
+
+You can then launch the container using the command `artefact`.
+
+Once the container is running, you're in the `production` directory of the code, from where you should be able to see your data and any local changes you've made to the code. Run your inference script as:
+
+```
+python my_inference_script.py
 ```
