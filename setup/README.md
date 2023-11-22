@@ -17,9 +17,9 @@
 Now, to run inferences on your own data, you have to mount tha data, as well as the model code + inference scripts (this repository) into the container like so:
 
 ```
-docker container run --mount type=bind,source="MRIArtefactDetection",target=/root/artefacts_detection
-                      --mount type=bind,source="PATH/TO/DATA",target=/root/artefacts_detection/production
-                      -w /root/artefacts_detection/production
+docker container run --mount type=bind,source="MRIArtefactDetection",target=/root/artefacts_detection \
+                      --mount type=bind,source="PATH/TO/DATA",target=/root/artefacts_detection/production/data \
+                      -w /root/artefacts_detection/production \
                       -it artefacts
 ```
 
