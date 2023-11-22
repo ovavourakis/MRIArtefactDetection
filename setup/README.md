@@ -23,6 +23,8 @@ docker container run --mount type=bind,source="./MRIArtefactDetection",target=/r
                       -it artefacts
 ```
 
+Be sure to replace `PATH/TO/DATA` with wherever you keep your data on your system (the top-level folder).
+
 This will start up the container. Switch to to `production` directory and run your inference script on your data.
 
 ```
