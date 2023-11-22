@@ -2,7 +2,7 @@
 
 ## Setting Up
 
-0. Make sure you have `git` and `Docker` installed on your system.
+0. Make sure you have `git` and `Docker` installed on your system, and that Docker is running.
 1. Clone this repository to your preferred location.
    ``` bash
    git clone git@github.com:ovavourakis/MRIArtefactDetection.git
@@ -17,7 +17,7 @@
 Now, to run inferences on your own data, you have to mount tha data, as well as the model code + inference scripts (this repository) into the container like so:
 
 ```
-docker container run --mount type=bind,source="MRIArtefactDetection",target=/root/artefacts_detection \
+docker container run --mount type=bind,source="./MRIArtefactDetection",target=/root/artefacts_detection \
                       --mount type=bind,source="PATH/TO/DATA",target=/root/artefacts_detection/production/data \
                       -w /root/artefacts_detection/production \
                       -it artefacts
