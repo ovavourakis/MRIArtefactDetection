@@ -4,7 +4,6 @@ import scipy.ndimage
 
 CLASSES_LABELS = {0: "clean", 1: "artifact"}
 
-
 def normalize(img):
     m=np.mean(img)
     st=np.std(img)
@@ -27,12 +26,21 @@ def pad_img(img):
 
 
 def resize_img(img,img_shape):
+    """
+    Downsamples the image to the size of the input of the model.
+    """
     size=list(img_shape)
     zoom=[1.0*x/y for x, y in zip(size, img.shape)]
     return scipy.ndimage.zoom(img, zoom=zoom)
 
 
 def load_and_reorient(path):
+    """
+    Load and reorients the image to standard orientation 'SPL', i.e.
+    x: superior (feet to head), y: posterior (front to back), z: left (to right)
+
+    Returns the image data as a numpy array.
+    """
     img = nib.load(path)
     orig_ornt = nib.io_orientation(img.affine)
     targ_ornt = nib.orientations.axcodes2ornt("SPL")
