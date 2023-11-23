@@ -3,6 +3,9 @@
 """
 This script runs MC inference on a set of images and ouputs the raw artefact-probability estimates
 for each MC run for each image.
+
+Model supposedly supports the following modalities:
+"dwi", "flr", "mtOFF", "mtON", "pdw", "t1c", "t1g", "t1p", "t2w"
 """
 
 import argparse, os, onnxruntime, multiprocessing, logging
@@ -10,7 +13,6 @@ from utils import get_subj_data, collate_inferences
 from sys import stdout, argv
 
 WEIGHTS = os.path.join(os.path.dirname(__file__), 'weights/model.FINAL.onnx')
-MODALITIES = ["dwi", "flr", "mtOFF", "mtON", "pdw", "t1c", "t1g", "t1p", "t2w"]
 
 logger = logging.getLogger()
 
