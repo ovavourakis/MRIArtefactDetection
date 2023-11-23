@@ -14,13 +14,17 @@ def load_predictions_and_ground_truth(MODEL_PREDS, GROUND_TRUTH):
 
     return ground_truth_labels, model_preds
 
-def assign_class(raw_prob, threshold=0.5):
-    return 1 if raw_prob >= threshold else 0
+def assign_class(raw_prob, thresh=0.5):
+    return 1 if raw_prob >= thresh else 0
 
-def compute_mean_class_and_uncertainty(raw_model_preds, num_mc_runs=20):
+def compute_mean_class_and_uncertainty(raw_model_preds, num_mc_runs=20, thresh=0.5):
     # this is for option (A): predictive probability = average predicted class
-    model_assigned_classes = raw_model_preds.iloc[:,:num_mc_runs].applymap(assign_class)
+    model_assigned_classes = raw_model_preds.iloc[:,:num_mc_runs].applymap(lambda x: assign_class(x, thresh=thresh))
     return model_assigned_classes.mean(axis=1), model_assigned_classes.std(axis=1)
+
+def compute_mean_prob_and_uncertainty(raw_model_preds, num_mc_runs=20):
+    # this is for option (B): predictive probability = average predictive probability
+    return raw_model_preds.iloc[:,:num_mc_runs].mean(axis=1), raw_model_preds.iloc[:,:num_mc_runs].std(axis=1)
 
 def plot_mean_class_histograms(mean, std, num_mc_runs, nbins, outdir):
     # plot histogram of mean-class predictions
@@ -46,6 +50,7 @@ def plot_predictive_undertainty_per_bin(mean, std, num_mc_runs, nbins, outdir):
     # plot the average std_dev against the bin identifiers
     x = np.linspace(0, 10, nbins)*10
     plt.plot(x, average_std_per_bin)
+    plt.ylim(0, 0.55)
     plt.xlabel('Mean Class Prediction [Percentile]')
     plt.ylabel('Average Prediction StdDev in Percentile')
     plt.title(f'Average StdDev of Mean Class Prediction for MC={num_mc_runs}')
@@ -55,7 +60,7 @@ def plot_predictive_undertainty_per_bin(mean, std, num_mc_runs, nbins, outdir):
 def plot_calibration_plot(mean_preds, gt, num_mc_runs, nbins, outdir):
     mean_preds_bins = pd.cut(mean_preds, bins=np.linspace(0, 1, nbins+1), include_lowest=True)    
     preds_and_bins = pd.concat([mean_preds, mean_preds_bins], axis=1)
-    merged = pd.merge(preds_and_bins,  ground_truth_labels.set_index('id')['bin_gt'], 
+    merged = pd.merge(preds_and_bins,  gt.set_index('id')['bin_gt'], 
                         left_index=True, right_index=True)
     merged.columns = ['mean_pred', 'bin_pred', 'gt']
     average_gt_per_bin = merged.groupby('bin_pred').agg({'gt': 'mean'})*100
@@ -84,14 +89,17 @@ def merge_predictions_and_gt(mean, std, ground_truth_labels):
 def calculate_DFFMR_AP_AUROC(merged, eta):
     # fraction of Dataset Flagged For Manual Review (DFFMR)
     num_images = merged.shape[0]
-    num_discarded = sum(merged['scaled_std_pred'] > eta)
+    num_discarded = sum(merged['scaled_std_pred'] >= eta)
     DFFMR = num_discarded/num_images
 
     # average precision (AP) on the retained set
-    retained = merged[merged['scaled_std_pred'] <= eta]   
-    AP = average_precision_score(retained['bin_gt'], retained['mean_pred'])
-    # area under the roc curve (AUC) on the retained set
-    AUC = roc_auc_score(retained['bin_gt'], retained['mean_pred'])
+    if sum(merged['scaled_std_pred'] < eta) == 0:
+        AP, AUC = np.nan, np.nan
+    else:
+        retained = merged[merged['scaled_std_pred'] < eta]   
+        AP = average_precision_score(retained['bin_gt'], retained['mean_pred'])
+        # area under the roc curve (AUC) on the retained set
+        AUC = roc_auc_score(retained['bin_gt'], retained['mean_pred'])
 
     return DFFMR, AP, AUC
 
@@ -111,29 +119,32 @@ def plot_DFFMR_AP_AUROC(merged, num_mc_runs, OUTDIR):
 def calculate_gridpoint_metrics(merged, eta, theta):
     # fraction of Dataset Flagged For Manual Review (DFFMR)
     num_images = merged.shape[0]
-    num_discarded = sum(merged['scaled_std_pred'] > eta)
+    num_discarded = sum(merged['scaled_std_pred'] >= eta)
     DFFMR = num_discarded/num_images
 
-    # unusable dataset missed (UDM)
-    retained = merged[merged['scaled_std_pred'] <= eta]
-    retained_labeled_clean = retained[retained['mean_pred'] < theta]
-    FN = retained_labeled_clean['bin_gt'].sum()
-    num_labelled_clean = retained_labeled_clean.shape[0]
-    UDM = FN/num_labelled_clean if num_labelled_clean > 0 else np.nan
+    if DFFMR == 1.0:
+        return np.nan, DFFMR, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan
+    else: 
+        # unusable dataset missed (UDM)
+        retained = merged[merged['scaled_std_pred'] < eta]
+        retained_labeled_clean = retained[retained['mean_pred'] < theta]
+        FN = retained_labeled_clean['bin_gt'].sum()
+        num_labelled_clean = retained_labeled_clean.shape[0]
+        UDM = FN/num_labelled_clean if num_labelled_clean > 0 else np.nan
 
-    # F1, precision, recall for the retained set
-    binarised_preds = retained['mean_pred'] > theta
-    tn, fp, fn, tp = confusion_matrix(retained['bin_gt'], binarised_preds).ravel()
-    accuracy = (tp+tn)/(tp+tn+fp+fn) if (tp+tn+fp+fn > 0) else np.nan
-    specificity = tn / (tn+fp) if (tn+fp > 0) else np.nan
-    F1 = f1_score(retained['bin_gt'], binarised_preds, zero_division=np.nan)
-    precision = precision_score(retained['bin_gt'], binarised_preds, zero_division=np.nan)
-    recall = recall_score(retained['bin_gt'], binarised_preds, zero_division=np.nan)
+        # F1, precision, recall for the retained set
+        binarised_preds = retained['mean_pred'] > theta
+        tn, fp, fn, tp = confusion_matrix(retained['bin_gt'], binarised_preds).ravel()
+        accuracy = (tp+tn)/(tp+tn+fp+fn) if (tp+tn+fp+fn > 0) else np.nan
+        specificity = tn / (tn+fp) if (tn+fp > 0) else np.nan
+        F1 = f1_score(retained['bin_gt'], binarised_preds, zero_division=np.nan)
+        precision = precision_score(retained['bin_gt'], binarised_preds, zero_division=np.nan)
+        recall = recall_score(retained['bin_gt'], binarised_preds, zero_division=np.nan)
 
-    scores = [DFFMR, UDM, 1-F1, 1-specificity]
-    combined_score = sum(scores)
-    
-    return combined_score, DFFMR, UDM, F1, precision, recall, accuracy, specificity
+        scores = [DFFMR, UDM, 1-F1, 1-specificity]
+        combined_score = sum(scores)
+        
+        return combined_score, DFFMR, UDM, F1, precision, recall, accuracy, specificity
 
 def gridpoint_metrics_tensor(merged):
     etas = np.linspace(0, 1, 50)
@@ -146,7 +157,7 @@ def gridpoint_metrics_tensor(merged):
     # print the best gridpoint (in terms of the combined score)
     # optimisation_tensor = gridpoint_metrics[gridpoint_metrics['DFFMR'] > 0.2]
     # print(optimisation_tensor.iloc[[optimisation_tensor['combined'].argmin()]])
-    # print(gridpoint_metrics.iloc[[gridpoint_metrics['combined'].argmin()]])
+    print(gridpoint_metrics.iloc[[gridpoint_metrics['combined'].argmin()]])
     
     return gridpoint_metrics
 
@@ -176,23 +187,39 @@ def plot_gridpoint_metrics(gpm_tensor, num_mc_runs, OUTDIR):
         plt.close()
 
 GROUND_TRUTH = '/Users/odysseasvavourakis/Documents/2023-2024/Studium/SABS/GE Project/data.nosync/artefacts/derivatives/scores.tsv'
-MODEL_PREDS = 'output.csv'
-OUTDIR = 'analysis_out'
+MODEL_PREDS = 'raw_mcmc20_out.csv'
+OUTDIR_A = 'analysis_A_out'
+OUTDIR_B = 'analysis_B_out'
 
-# make the output-directory, if it doesn't yet exist
-if not os.path.exists(OUTDIR):
-    os.makedirs(OUTDIR)
+# make the output-directories, if they don't yet exist
+for OUTDIR in [OUTDIR_A, OUTDIR_B]:
+    if not os.path.exists(OUTDIR):
+        os.makedirs(OUTDIR)
 
 ground_truth_labels, raw_model_preds = load_predictions_and_ground_truth(MODEL_PREDS, GROUND_TRUTH)
 
 # option (A): predictive probability = average predicted class
 mean, std = compute_mean_class_and_uncertainty(raw_model_preds, 20)
-plot_mean_class_histograms(mean, std, 20, 10, OUTDIR)
-plot_predictive_undertainty_per_bin(mean, std, 20, 10, OUTDIR)
-plot_calibration_plot(mean, ground_truth_labels['bin_gt'], 20, 10, OUTDIR)
+plot_mean_class_histograms(mean, std, 20, 10, OUTDIR_A)
+plot_predictive_undertainty_per_bin(mean, std, 20, 10, OUTDIR_A)
+plot_calibration_plot(mean, ground_truth_labels, 20, 10, OUTDIR_A)
 
 merged = merge_predictions_and_gt(mean, std, ground_truth_labels)
-plot_DFFMR_AP_AUROC(merged, 20, OUTDIR)
+plot_DFFMR_AP_AUROC(merged, 20, OUTDIR_A)
 
 gpm_tensor = gridpoint_metrics_tensor(merged)
-plot_gridpoint_metrics(gpm_tensor, 20, OUTDIR)
+plot_gridpoint_metrics(gpm_tensor, 20, OUTDIR_A)
+
+
+# option (B): predictive probability = average predictive probability
+mean, std = compute_mean_prob_and_uncertainty(raw_model_preds, 20)
+plot_mean_class_histograms(mean, std, 20, 10, OUTDIR_B)
+plot_predictive_undertainty_per_bin(mean, std, 20, 10, OUTDIR_B)
+plot_calibration_plot(mean, ground_truth_labels, 20, 10, OUTDIR_B)
+
+# from here on out this might not make sense, but it was worth a quick try -> think about this
+merged = merge_predictions_and_gt(mean, std, ground_truth_labels)
+plot_DFFMR_AP_AUROC(merged, 20, OUTDIR_B)
+
+gpm_tensor = gridpoint_metrics_tensor(merged)
+plot_gridpoint_metrics(gpm_tensor, 20, OUTDIR_B)
