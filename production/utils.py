@@ -52,7 +52,7 @@ def load_and_reorient(path):
 def get_subj_data(p, input_size=(1,256,256,64,1)):
     img_shape=input_size[1:-1]
     img = load_and_reorient(p)
-    img = swap_axes(img)
+    img = swap_axes(img) # TODO: why?
     if any(np.asarray(img.shape)>np.asarray(img_shape)):
         img=resize_img(img,img_shape)
     img = normalize(img)
