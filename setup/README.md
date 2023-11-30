@@ -12,7 +12,7 @@
    docker build -t artefacts MRIArtefactDetection/setup/ 
    ```
 
-## Running Inference
+## Mounting
 
 Now, to run inferences on your own data, you have to mount tha data, as well as the model code + inference scripts (this repository) into the container like so:
 
@@ -37,8 +37,4 @@ echo "alias artefact='docker container run --mount type=bind,source="./MRIArtefa
 
 You can then launch the container using the command `artefact`.
 
-Once the container is running, you're in the `production` directory of the code, from where you should be able to see your data and any local changes you've made to the code. Run your inference script as:
-
-```
-python my_inference_script.py
-```
+Once the container is running, check the instructions in the `inference` directory for how to proceed.

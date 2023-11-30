@@ -1,4 +1,4 @@
-import os, pandas as pd, numpy as np, matplotlib.pyplot as plt, seaborn as sns
+import os, math, pandas as pd, numpy as np, matplotlib.pyplot as plt, seaborn as sns
 from sklearn.metrics import average_precision_score, roc_auc_score, f1_score, precision_score, recall_score, confusion_matrix
 from tqdm import tqdm
 
@@ -43,7 +43,7 @@ def plot_mean_class_histograms(mean, std, num_mc_runs, nbins, outdir):
     plt.savefig(outdir+f'/hist_std_mean_class_mc_{num_mc_runs}.png')
     plt.clf()
 
-def plot_predictive_undertainty_per_bin(mean, std, num_mc_runs, nbins, outdir):
+def plot_predictive_uncertainty_per_bin(mean, std, num_mc_runs, nbins, outdir):
     # bin the mean-class predictions and calc. average std_dev per bin
     mean_bins = pd.cut(mean, bins=np.linspace(0, 1, nbins+1), include_lowest=True)
     average_std_per_bin = pd.concat([mean, mean_bins, std], axis=1).groupby(1, observed=False).agg({2: 'mean'})
@@ -114,11 +114,11 @@ def plot_DFFMR_AP_AUROC(merged, num_mc_runs, maxDFFMR, OUTDIR):
     DFFMR_AP.plot()
 
     plt.axhline(y=maxDFFMR, color='r', linestyle='--')  # horizontal line
-    crossing_point = DFFMR_AP[DFFMR_AP['DFFMR'] >= maxDFFMR].index[-1]
-    plt.axvline(x=crossing_point, color='r', linestyle='--')  # vertical line
+    min_eta = DFFMR_AP[DFFMR_AP['DFFMR'] >= maxDFFMR].index[-1]
+    plt.axvline(x=min_eta, color='r', linestyle='--')  # vertical line
 
     # Shade everything to the left of the vertical line in gray
-    plt.fill_between(DFFMR_AP.index, 0, 1, where=DFFMR_AP.index <= crossing_point, color='gray', alpha=0.3)
+    plt.fill_between(DFFMR_AP.index, 0, 1, where=DFFMR_AP.index <= min_eta, color='gray', alpha=0.3)
 
     plt.xlabel('Uncertainty Threshold eta')
     plt.ylabel('Metric Value')
@@ -126,6 +126,8 @@ def plot_DFFMR_AP_AUROC(merged, num_mc_runs, maxDFFMR, OUTDIR):
     plt.title('Pre-Screening Performance')
     plt.savefig(OUTDIR+f'/eta_preescreening_mc_{num_mc_runs}.png')
     plt.clf()
+
+    return min_eta
 
 def pointwise_metrics(retained, theta):
     binarised_preds = retained['mean_pred'] > theta
@@ -138,6 +140,9 @@ def pointwise_metrics(retained, theta):
     return F1, precision, recall, accuracy, specificity
 
 def calculate_gridpoint_metrics(merged, eta, theta):
+    # TODO: check if sensible and accurately implemented - amend as appropriate
+    # TODO: re-define combined score
+
     # fraction of Dataset Flagged For Manual Review (DFFMR)
     num_images = merged.shape[0]
     num_discarded = sum(merged['scaled_std_pred'] >= eta)
@@ -155,7 +160,7 @@ def calculate_gridpoint_metrics(merged, eta, theta):
 
         # usable dataset discarded (UDD)
         all_discarded = merged[(merged['scaled_std_pred'] >= eta) | (merged['mean_pred'] >= theta)]
-        UDD = all_discarded['bin_gt'].sum()/merged['bin_gt'].sum()
+        UDD = (all_discarded['bin_gt']==0).sum()/(merged['bin_gt']==0).sum()
 
         # F1, precision, recall for the retained set
         F1, precision, recall, accuracy, specificity = pointwise_metrics(retained, theta)
@@ -165,8 +170,8 @@ def calculate_gridpoint_metrics(merged, eta, theta):
         
         return combined_score, DFFMR, UDM, F1, precision, recall, accuracy, specificity, UDD
 
-def gridpoint_metrics_tensor(merged, maxDFFMR=0.3, lattice_size=50):
-    etas = np.linspace(0, 1, lattice_size)
+def gridpoint_metrics_tensor(merged, min_eta, lattice_size=50):
+    etas = np.linspace(min_eta, 1, math.ceil(lattice_size * (1-min_eta)))
     thetas = np.linspace(0, 1, lattice_size)
     print('Running over eta grid:')
     gridpoint_metrics = pd.DataFrame([calculate_gridpoint_metrics(merged, eta, theta) 
@@ -174,9 +179,8 @@ def gridpoint_metrics_tensor(merged, maxDFFMR=0.3, lattice_size=50):
     gridpoint_metrics.columns = ['combined', 'DFFMR', 'UDM', 'F1', 'precision', 'recall', 'accuracy', 'specificity', 'UDD']
     gridpoint_metrics.index = pd.MultiIndex.from_product([etas, thetas], names=['eta', 'theta'])
 
-    # print the best gridpoint (in terms of the combined score)
-    optimisation_tensor = gridpoint_metrics[gridpoint_metrics['DFFMR'] < maxDFFMR]
-    print(optimisation_tensor.iloc[[optimisation_tensor['combined'].argmin()]])
+    print('Optimal parameters based on argimin of combined score:')
+    print(gridpoint_metrics.iloc[[gridpoint_metrics['combined'].argmin()]])
     
     return gridpoint_metrics
 
@@ -206,7 +210,6 @@ def plot_gridpoint_metrics(gpm_tensor, maxDFFMR, num_mc_runs, OUTDIR):
 def one_stage_screening(merged, OUTDIR='analysis_A_out'):
     # single-number stats
     DFFMR, AP, AUC = calculate_DFFMR_AP_AUROC(merged, eta=1.1) # don't exclude any images
-    print(DFFMR)
     # threshold-dependent stats
     thetas = np.linspace(0, 1, 100)
     pwm = pd.DataFrame([calculate_gridpoint_metrics(merged, 1.1, theta) for theta in thetas])
@@ -238,9 +241,9 @@ def one_stage_screening(merged, OUTDIR='analysis_A_out'):
 
 def two_stage_screening(merged, MC=20, maxDFFMR=0.3, lattice_size=50, OUTDIR='analysis_A_out'):
     # eta-dependent stats
-    plot_DFFMR_AP_AUROC(merged, MC, maxDFFMR, OUTDIR)
+    min_eta = plot_DFFMR_AP_AUROC(merged, MC, maxDFFMR, OUTDIR) # min_eta to ensure DFFMR <= maxDFFMR
     # eta-and-theta-dependent stats
-    gpm_tensor = gridpoint_metrics_tensor(merged, maxDFFMR=maxDFFMR, lattice_size=lattice_size)
+    gpm_tensor = gridpoint_metrics_tensor(merged, min_eta, lattice_size=lattice_size)
     plot_gridpoint_metrics(gpm_tensor, maxDFFMR, MC, OUTDIR+'/two_stage_screening')
 
 def run_analysis(raw_model_preds, ground_truth_labels, MC=20, nbins=10, maxDFFMR=0.3, lattice_size=50, option='mean_class', OUTDIR='analysis_A_out', init_thresh=0.5):
@@ -257,7 +260,7 @@ def run_analysis(raw_model_preds, ground_truth_labels, MC=20, nbins=10, maxDFFMR
         raise ValueError('analysis option must be either A or B')
 
     plot_mean_class_histograms(mean, std, MC, nbins, OUTDIR)
-    plot_predictive_undertainty_per_bin(mean, std, MC, nbins, OUTDIR)
+    plot_predictive_uncertainty_per_bin(mean, std, MC, nbins, OUTDIR)
     plot_calibration_plot(mean, ground_truth_labels, MC, nbins, OUTDIR)
 
     merged = merge_predictions_and_gt(mean, std, ground_truth_labels)
@@ -265,18 +268,3 @@ def run_analysis(raw_model_preds, ground_truth_labels, MC=20, nbins=10, maxDFFMR
     one_stage_screening(merged, OUTDIR=OUTDIR+'/one_stage_screening')
     # two-stage screening (uncertainty and probability thresholds)
     two_stage_screening(merged, MC, maxDFFMR, lattice_size, OUTDIR=OUTDIR+'/two_stage_screening')
-
-# BEGIN MAIN ====================================================================================
-
-GROUND_TRUTH = '/Users/odysseasvavourakis/Documents/2023-2024/Studium/SABS/GE Project/data.nosync/artefacts/derivatives/scores.tsv'
-MODEL_PREDS = 'raw_mcmc20_out.csv'
-OUTDIR_A = 'analysis_mean_class'
-OUTDIR_B = 'analysis_mean_prob'
-
-ground_truth_labels, raw_model_preds = load_predictions_and_ground_truth(MODEL_PREDS, GROUND_TRUTH)
-# option (A): predictive probability = average predicted class
-run_analysis(raw_model_preds, ground_truth_labels, 
-            MC=20, nbins=10, maxDFFMR=0.3, lattice_size=50, option='mean_class', OUTDIR=OUTDIR_A, init_thresh=0.5)
-# option (B): predictive probability = average predictive probability
-run_analysis(raw_model_preds, ground_truth_labels, 
-             MC=20, nbins=10, maxDFFMR=0.3, lattice_size=50, option='mean_prob', OUTDIR=OUTDIR_B)
