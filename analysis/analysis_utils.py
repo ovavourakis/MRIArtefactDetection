@@ -14,17 +14,52 @@ def load_predictions_and_ground_truth(MODEL_PREDS, GROUND_TRUTH):
 
     return ground_truth_labels, model_preds
 
-def load_predictions_GE(MODEL_PREDS):
-    # read model predictions
-    model_preds = pd.read_csv(MODEL_PREDS, sep=',', header=None)
+def load_predictions_GE(PREDS_DIR):
+    # read model predictions with artefacts 
+    model_preds = pd.read_csv(PREDS_DIR+'/GE_with_artefacts.csv', sep=',', header=None)
     model_preds.loc[:,0] = model_preds.loc[:,0].str.split('/').str[-1].str.split('.').str[0]
-    model_preds.set_index(0, inplace=True)
-    # correspnding ground truth
+    model_preds.set_index(0, inplace=True)    
+    # corresponding ground truth
     ground_truth_labels = pd.DataFrame(model_preds.index)
     ground_truth_labels['bin_gt'] = pd.Series(np.ones(ground_truth_labels.shape[0]))
     ground_truth_labels.rename(columns={0: 'id'}, inplace=True)
 
-    return ground_truth_labels, model_preds
+    # read model predictions without artefacts
+    model_preds_1 = pd.read_csv(PREDS_DIR+'/GE_clean.csv', sep=',', header=None)
+    model_preds_1.loc[:,0] = model_preds_1.loc[:,0].str.split('/').str[-1].str.split('.').str[0]
+    model_preds_1.set_index(0, inplace=True)
+    # corresponding ground truth
+    ground_truth_labels_1 = pd.DataFrame(model_preds_1.index)
+    ground_truth_labels_1['bin_gt'] = pd.Series(np.zeros(ground_truth_labels_1.shape[0]))
+    ground_truth_labels_1.rename(columns={0: 'id'}, inplace=True)
+
+    # read model predictions on mixed data
+    model_preds_2 = pd.read_csv(PREDS_DIR+'/GE_mixed.csv', sep=',', header=None)
+    model_preds_2.loc[:,0] = model_preds_2.loc[:,0].str.split('/').str[-1]
+    model_preds_2.set_index(0, inplace=True)
+    # corresponding ground truth
+    ground_truth_labels_2 = pd.DataFrame(model_preds_2.index)
+    ground_truth_labels_2['bin_gt'] = pd.Series(np.zeros(ground_truth_labels_2.shape[0]))
+    ground_truth_labels_2.rename(columns={0: 'id'}, inplace=True)
+
+    # exclude all flair images
+    model_preds_2_sans_flair = model_preds_2[~model_preds_2.index.str.contains('flair')]
+    ground_truth_labels_2_sans_flair = ground_truth_labels_2[~ground_truth_labels_2['id'].str.contains('flair')]
+
+    # set selected flair images to 1
+    problematic_set = ['3823', '4033', '5241', '5352', '7845', '9916'] # not all of these HAVE flair images in the results?
+    problematic_ids = '|'.join([i+'.flair' for i in problematic_set])
+    ground_truth_labels_2.loc[model_preds_2.index.str.contains(problematic_ids), 'bin_gt'] = 1
+
+    # merge all data
+    model_preds_sans_flair = pd.concat([model_preds, model_preds_1, model_preds_2_sans_flair])
+    ground_truth_labels_sans_flair = pd.concat([ground_truth_labels, ground_truth_labels_1, ground_truth_labels_2_sans_flair])
+
+    model_preds_con_flair = pd.concat([model_preds, model_preds_1, model_preds_2])
+    ground_truth_labels_con_flair = pd.concat([ground_truth_labels, ground_truth_labels_1, ground_truth_labels_2])
+
+    return ground_truth_labels_sans_flair, model_preds_sans_flair, ground_truth_labels_con_flair, model_preds_con_flair
+    # return ground_truth_labels_con_flair, model_preds_con_flair
 
 def assign_class(raw_prob, thresh=0.5):
     return 1 if raw_prob >= thresh else 0
@@ -114,7 +149,10 @@ def calculate_DFFMR_AP_AUROC(merged, eta):
         retained = merged[merged['scaled_std_pred'] < eta]   
         AP = average_precision_score(retained['bin_gt'], retained['mean_pred'])
         # area under the roc curve (AUC) on the retained set
-        AUC = roc_auc_score(retained['bin_gt'], retained['mean_pred'])
+        if sum(retained['bin_gt']) == 0 or sum(retained['bin_gt']) == len(retained['bin_gt']):
+            AUC = np.nan
+        else:
+            AUC = roc_auc_score(retained['bin_gt'], retained['mean_pred'])
 
     return DFFMR, AP, AUC
 

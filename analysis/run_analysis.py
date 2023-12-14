@@ -27,12 +27,17 @@ from analysis_utils import *
 
 GROUND_TRUTH = '/Users/odysseasvavourakis/Documents/2023-2024/Studium/SABS/GE Project/data.nosync/artefacts/derivatives/scores.tsv'
 MODEL_PREDS = 'raw_mcmc20_out.csv'
-OUTDIR_A = 'analysis_mean_class'
-OUTDIR_B = 'analysis_mean_prob'
+
+GE_DIR = 'GE_data'
+
+OUTDIR_A = 'GE_analysis_mean_class'
+OUTDIR_B = 'GE_analysis_mean_prob'
 
 # load predictions and ground truth
-# TODO: re-implement this parser for your own data !
-ground_truth_labels, raw_model_preds = load_predictions_and_ground_truth(MODEL_PREDS, GROUND_TRUTH)
+# ground_truth_labels, raw_model_preds = load_predictions_and_ground_truth(MODEL_PREDS, GROUND_TRUTH)
+ground_truth_labels, raw_model_preds, _, _ = load_predictions_GE(GE_DIR) # without FLAIR
+# _, _, ground_truth_labels, raw_model_preds = load_predictions_GE(GE_DIR) # with FLAIR
+
 
 print('Running analysis for predictive probability := average predicted class')
 run_analysis(raw_model_preds, ground_truth_labels, 
