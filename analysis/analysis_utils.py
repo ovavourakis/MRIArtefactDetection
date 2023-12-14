@@ -14,6 +14,18 @@ def load_predictions_and_ground_truth(MODEL_PREDS, GROUND_TRUTH):
 
     return ground_truth_labels, model_preds
 
+def load_predictions_GE(MODEL_PREDS):
+    # read model predictions
+    model_preds = pd.read_csv(MODEL_PREDS, sep=',', header=None)
+    model_preds.loc[:,0] = model_preds.loc[:,0].str.split('/').str[-1].str.split('.').str[0]
+    model_preds.set_index(0, inplace=True)
+    # correspnding ground truth
+    ground_truth_labels = pd.DataFrame(model_preds.index)
+    ground_truth_labels['bin_gt'] = pd.Series(np.ones(ground_truth_labels.shape[0]))
+    ground_truth_labels.rename(columns={0: 'id'}, inplace=True)
+
+    return ground_truth_labels, model_preds
+
 def assign_class(raw_prob, thresh=0.5):
     return 1 if raw_prob >= thresh else 0
 
@@ -208,6 +220,7 @@ def plot_gridpoint_metrics(gpm_tensor, maxDFFMR, num_mc_runs, OUTDIR):
         plt.close()
 
 def one_stage_screening(merged, OUTDIR='analysis_A_out'):
+    os.makedirs(OUTDIR, exist_ok=True)
     # single-number stats
     DFFMR, AP, AUC = calculate_DFFMR_AP_AUROC(merged, eta=1.1) # don't exclude any images
     # threshold-dependent stats
@@ -240,17 +253,16 @@ def one_stage_screening(merged, OUTDIR='analysis_A_out'):
     plt.clf()
 
 def two_stage_screening(merged, MC=20, maxDFFMR=0.3, lattice_size=50, OUTDIR='analysis_A_out'):
+    os.makedirs(OUTDIR, exist_ok=True)
     # eta-dependent stats
     min_eta = plot_DFFMR_AP_AUROC(merged, MC, maxDFFMR, OUTDIR) # min_eta to ensure DFFMR <= maxDFFMR
     # eta-and-theta-dependent stats
     gpm_tensor = gridpoint_metrics_tensor(merged, min_eta, lattice_size=lattice_size)
     plot_gridpoint_metrics(gpm_tensor, maxDFFMR, MC, OUTDIR+'/two_stage_screening')
 
-def run_analysis(raw_model_preds, ground_truth_labels, MC=20, nbins=10, maxDFFMR=0.3, lattice_size=50, option='mean_class', OUTDIR='analysis_A_out', init_thresh=0.5):
+def run_synoptic_analysis(raw_model_preds, ground_truth_labels, MC=20, nbins=10, option='mean_class', OUTDIR='analysis_A_out', init_thresh=0.5):
     # setup
-    os.makedirs(OUTDIR+'/one_stage_screening', exist_ok=True)
-    os.makedirs(OUTDIR+'/two_stage_screening', exist_ok=True)
-
+    os.makedirs(OUTDIR, exist_ok=True)
     # analysis
     if option == 'mean_class':  # note: the init_thresh kwarg only affects option (A)
         mean, std = compute_mean_class_and_uncertainty(raw_model_preds, MC, thresh=init_thresh)
@@ -264,7 +276,98 @@ def run_analysis(raw_model_preds, ground_truth_labels, MC=20, nbins=10, maxDFFMR
     plot_calibration_plot(mean, ground_truth_labels, MC, nbins, OUTDIR)
 
     merged = merge_predictions_and_gt(mean, std, ground_truth_labels)
+
+    return merged
+
+def run_analysis(raw_model_preds, ground_truth_labels, MC=20, nbins=10, maxDFFMR=0.3, lattice_size=50, option='mean_class', OUTDIR='analysis_A_out', init_thresh=0.5):
+    merged = run_synoptic_analysis(raw_model_preds, ground_truth_labels, MC, nbins, option, OUTDIR, init_thresh)
     # one-stage screening (probability threshold only)
     one_stage_screening(merged, OUTDIR=OUTDIR+'/one_stage_screening')
     # two-stage screening (uncertainty and probability thresholds)
     two_stage_screening(merged, MC, maxDFFMR, lattice_size, OUTDIR=OUTDIR+'/two_stage_screening')
+
+def split_by_uncertainty(merged, eta):
+    unc_pass = merged[merged['scaled_std_pred'] <= eta]
+    unc_fail = merged[merged['scaled_std_pred'] > eta]
+    return unc_pass, unc_fail
+
+def split_by_prob(unc_pass, lower, upper):
+    def_clean = unc_pass[unc_pass['mean_pred'] < lower]
+    def_dirty = unc_pass[unc_pass['mean_pred'] > upper]
+    prob_fail = unc_pass[(unc_pass['mean_pred'] >= lower) & (unc_pass['mean_pred'] <= upper)]
+    return def_clean, prob_fail, def_dirty
+
+def ternary_split(merged, eta, theta, tau):
+    # split into 3 subsets: clean, dirty, for_review
+    # also return for_review split by review reason
+    unc_pass, unc_fail = split_by_uncertainty(merged, eta)
+    def_clean, prob_fail, def_dirty = split_by_prob(unc_pass, theta, tau)
+    for_review = pd.concat([unc_fail, prob_fail])
+
+    return def_clean, def_dirty, for_review, unc_fail, prob_fail
+
+def ternary_metrics(def_clean, def_dirty, for_review, unc_fail):
+    size_clean, size_dirty, size_for_rev = def_clean.shape[0], def_dirty.shape[0], for_review.shape[0]
+    impurity_clean = def_clean['bin_gt'].mean() if def_clean.shape[0] > 0 else 0
+    impurity_dirty = def_dirty['bin_gt'].mean() if def_dirty.shape[0] > 0 else 0
+
+    dffmr = for_review.shape[0] / sum([x.shape[0] for x in [def_clean, def_dirty, for_review]])
+    frac_dffmred_because_uncertain = unc_fail.shape[0] / for_review.shape[0] if for_review.shape[0] > 0 else np.nan
+    return size_clean, impurity_clean, size_dirty, impurity_dirty, 1-dffmr, size_for_rev, frac_dffmred_because_uncertain
+
+def ternary_gridpoint_metrics(merged, lattice_size=50):
+    etas = np.linspace(0, 1, lattice_size)
+    thetas = np.linspace(0, 1, lattice_size)
+    taus_full = np.linspace(0, 1, lattice_size)
+
+    gridpoint_ternary_metrics = pd.DataFrame([ternary_metrics(*ternary_split(merged, eta, theta, tau)[:-1])
+                                                for eta in tqdm(etas) for theta in thetas for tau in taus_full[taus_full >= theta]])
+    gridpoint_ternary_metrics.columns = ['size_clean', 'impurity_clean', 'size_dirty', 'impurity_dirty', 'wrkld_reduction', 'size_for_rev', 'frac_dffmred_because_uncertain']
+    gridpoint_ternary_metrics.index = pd.MultiIndex.from_tuples([(eta, theta, tau) 
+                                                                for eta in etas for theta in thetas for tau in taus_full[taus_full >= theta]], 
+                                                                names=['eta', 'theta', 'tau'])
+    return gridpoint_ternary_metrics
+
+def sort_and_filter_tensor(metrics_tensor, raw_data, max_clean_impurity=0.0, min_dirty_impurity=0.95, OUTDIR='analysis_A_out'):
+    """
+    Sanity-checks constraints against input data statistics (output must be better than input).
+        max_clean_impurity i.e. max acceptable FN (missed artefacts)
+        min_dirty_impurity i.e. max acceptable FP (needlessly rejected scans)
+
+    Sorts the gridpoints by achieved impurity_clean, wrkld_reduction, impurity_dirty.
+    Filters out gridpoints that give no workload improvement or do satisfy constraints:
+       
+
+    Writes the full_tensor and filtered_tensor to file.
+    """
+    input_impurity = raw_data['bin_gt'].mean()
+    assert(max_clean_impurity < input_impurity) # otherwise no point in running the model
+    assert(min_dirty_impurity > input_impurity) # otherwise no point in running the model
+
+    # sort tensor in order of objective priorities
+    metrics_tensor.sort_values(['impurity_clean', 'wrkld_reduction', 'impurity_dirty'], 
+                                ascending=[True, False, False], inplace=True)
+    # filter out gridpoints that give no workload improvement
+    metrics_tensor = metrics_tensor[metrics_tensor['wrkld_reduction']>0]
+    # write to file
+    with open(OUTDIR+'/full_ternary_grid.txt', 'w') as file:
+        file.write(metrics_tensor.to_string(index=True, float_format="{:.3f}".format))
+    # filter out gridpoints that violate constraints
+    within_constraints = metrics_tensor[(metrics_tensor['impurity_clean']<=max_clean_impurity) & 
+                                        (metrics_tensor['impurity_dirty']>=min_dirty_impurity)].copy()
+    # sort by highest workload reduction within constraints
+    within_constraints.sort_values(['wrkld_reduction'], ascending=[False], inplace=True)
+    # write to file
+    with open(OUTDIR+'/filtered_ternary_grid.txt', 'w') as file:
+        file.write(within_constraints.to_string(index=True, float_format="{:.3f}".format))
+
+    return metrics_tensor, within_constraints
+
+def run_ternary_analysis(raw_model_preds, ground_truth_labels, MC=20, nbins=10, lattice_size=50, option='mean_class', OUTDIR='analysis_A_out', init_thresh=0.5,  max_clean_impurity=0.0, min_dirty_impurity=0.95):
+    # collate model preds, do basic plots
+    merged = run_synoptic_analysis(raw_model_preds, ground_truth_labels, MC, nbins, option, OUTDIR, init_thresh)
+    # get metrics for each possible split of predictions by eta, theta, tau
+    metrics_tensor = ternary_gridpoint_metrics(merged, lattice_size)
+    # sort and filter tensor
+    full_tensor, within_constraints = sort_and_filter_tensor(metrics_tensor, merged, max_clean_impurity, min_dirty_impurity, OUTDIR)
+    print(within_constraints.head(1))
