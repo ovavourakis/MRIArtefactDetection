@@ -28,15 +28,23 @@ from analysis_utils import *
 GROUND_TRUTH = '/Users/odysseasvavourakis/Documents/2023-2024/Studium/SABS/GE Project/data.nosync/artefacts/derivatives/scores.tsv'
 MODEL_PREDS = 'raw_mcmc20_out.csv'
 
-GE_DIR = 'GE_data'
+GT2 = '/Users/odysseasvavourakis/Documents/2023-2024/Studium/SABS/GE Project/data.nosync/artefacts_2/scores.csv'
+MODEL_PREDS2 = 'raw_artefacts_2_mcmc_20_out.csv'
 
-OUTDIR_A = 'GE_analysis_mean_class'
-OUTDIR_B = 'GE_analysis_mean_prob'
+# GE_DIR = 'GE_data'
+
+OUTDIR_A = 'analysis_mean_class'
+OUTDIR_B = 'analysis_mean_prob'
 
 # load predictions and ground truth
-# ground_truth_labels, raw_model_preds = load_predictions_and_ground_truth(MODEL_PREDS, GROUND_TRUTH)
-ground_truth_labels, raw_model_preds, _, _ = load_predictions_GE(GE_DIR) # without FLAIR
-# _, _, ground_truth_labels, raw_model_preds = load_predictions_GE(GE_DIR) # with FLAIR
+ground_truth_labels, raw_model_preds = load_predictions_and_ground_truth(MODEL_PREDS, GROUND_TRUTH)
+gt2, rmp2 = load_predictions_and_ground_truth_2(MODEL_PREDS2, GT2)
+
+ground_truth_labels = pd.concat([ground_truth_labels, gt2])
+
+
+# # ground_truth_labels, raw_model_preds, _, _ = load_predictions_GE(GE_DIR) # without FLAIR
+# # _, _, ground_truth_labels, raw_model_preds = load_predictions_GE(GE_DIR) # with FLAIR
 
 
 print('Running analysis for predictive probability := average predicted class')

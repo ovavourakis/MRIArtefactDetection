@@ -12,6 +12,9 @@ You're ready to run inference. Here, we provide an example inference script `raw
 python raw_inference.py -m 20 -i image1 image2 
 ```
 
-This will output the raw predictions as a `csv`, where each row contains all predictions for the same image volume.
+If there are a a lot of image volumes to classify, you can also specify a list of them in a file and pass that file to `raw_inference.py` using the `-f` (or equivalently `--inputs_file`) flag, rather than writing them out one-by-one on the command line.
+
+This script will output the raw predictions as a `csv`, where each row contains all predictions for the same image volume.
+
 
 **GE: It would be helpful to have this output for a realistic dataset, along with the binary ground-truth (artefact/no) for each image volume.**

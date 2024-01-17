@@ -18,8 +18,8 @@ Now, to run inferences on your own data, you have to mount tha data, as well as 
 
 ```
 docker container run --mount type=bind,source="./MRIArtefactDetection",target=/root/artefacts_detection \
-                      --mount type=bind,source="PATH/TO/DATA",target=/root/artefacts_detection/production/data \
-                      -w /root/artefacts_detection/production \
+                      --mount type=bind,source="PATH/TO/DATA",target=/root/artefacts_detection/inference/data \
+                      -w /root/artefacts_detection/inference \
                       -it artefacts
 ```
 
@@ -29,8 +29,8 @@ Because this is a bit much too write every time, you might want to consider sett
 
 ```
 echo "alias artefact='docker container run --mount type=bind,source="./MRIArtefactDetection",target=/root/artefacts_detection \
-                      --mount type=bind,source="PATH/TO/DATA",target=/root/artefacts_detection/production/data \
-                      -w /root/artefacts_detection/production \
+                      --mount type=bind,source="PATH/TO/DATA",target=/root/artefacts_detection/inference/data \
+                      -w /root/artefacts_detection/inference \
                       -it artefacts'" >> ~/.bashrc \
 && source ~/.bashrc
 ```

@@ -2,6 +2,30 @@ import os, math, pandas as pd, numpy as np, matplotlib.pyplot as plt, seaborn as
 from sklearn.metrics import average_precision_score, roc_auc_score, f1_score, precision_score, recall_score, confusion_matrix
 from tqdm import tqdm
 
+def load_predictions_and_ground_truth_3(MODEL_PREDS, GROUND_TRUTH):
+    # read ground-truth and binarise to 0: clean, 1: artefact
+    ground_truth_labels = pd.read_csv(GROUND_TRUTH)
+    ground_truth_labels.drop_duplicates(subset=['id'], inplace=True) # delete duplicate rows
+    ground_truth_labels['id'] = ground_truth_labels['id'] .str.split('/').str[-1].str.split('.').str[0]
+    # read model predictions
+    model_preds = pd.read_csv(MODEL_PREDS, sep=',', header=None)
+    model_preds.loc[:,0] = model_preds.loc[:,0].str.split('/').str[-1].str.split('.').str[0]
+    model_preds.set_index(0, inplace=True)
+
+    return ground_truth_labels, model_preds
+
+def load_predictions_and_ground_truth_2(MODEL_PREDS, GROUND_TRUTH):
+    # read ground-truth and binarise to 0: clean, 1: artefact
+    ground_truth_labels = pd.read_csv(GROUND_TRUTH, delim_whitespace=True)
+    ground_truth_labels.drop_duplicates(subset=['id'], inplace=True) # delete duplicate rows
+    ground_truth_labels['id'] = ground_truth_labels['id'] .str.split('/').str[-1].str.split('.').str[0]
+    # read model predictions
+    model_preds = pd.read_csv(MODEL_PREDS, sep=',', header=None)
+    model_preds.loc[:,0] = model_preds.loc[:,0].str.split('/').str[-1].str.split('.').str[0]
+    model_preds.set_index(0, inplace=True)
+
+    return ground_truth_labels, model_preds
+
 def load_predictions_and_ground_truth(MODEL_PREDS, GROUND_TRUTH):
     # read ground-truth and binarise to 0: clean, 1: artefact
     ground_truth_labels = pd.read_csv(GROUND_TRUTH, sep='\t')
@@ -366,7 +390,7 @@ def ternary_gridpoint_metrics(merged, lattice_size=50):
                                                                 names=['eta', 'theta', 'tau'])
     return gridpoint_ternary_metrics
 
-def sort_and_filter_tensor(metrics_tensor, raw_data, max_clean_impurity=0.0, min_dirty_impurity=0.95, OUTDIR='analysis_A_out'):
+def sort_and_filter_tensor(metrics_tensor, raw_data, max_clean_impurity=0.0, min_dirty_impurity=0.95, min_wrkld_red=0.5, OUTDIR='analysis_A_out'):
     """
     Sanity-checks constraints against input data statistics (output must be better than input).
         max_clean_impurity i.e. max acceptable FN (missed artefacts)
@@ -375,7 +399,6 @@ def sort_and_filter_tensor(metrics_tensor, raw_data, max_clean_impurity=0.0, min
     Sorts the gridpoints by achieved impurity_clean, wrkld_reduction, impurity_dirty.
     Filters out gridpoints that give no workload improvement or do satisfy constraints:
        
-
     Writes the full_tensor and filtered_tensor to file.
     """
     input_impurity = raw_data['bin_gt'].mean()
@@ -392,7 +415,8 @@ def sort_and_filter_tensor(metrics_tensor, raw_data, max_clean_impurity=0.0, min
         file.write(metrics_tensor.to_string(index=True, float_format="{:.3f}".format))
     # filter out gridpoints that violate constraints
     within_constraints = metrics_tensor[(metrics_tensor['impurity_clean']<=max_clean_impurity) & 
-                                        (metrics_tensor['impurity_dirty']>=min_dirty_impurity)].copy()
+                                        (metrics_tensor['impurity_dirty']>=min_dirty_impurity) &
+                                        (metrics_tensor['wrkld_reduction']>=min_wrkld_red)].copy()
     # sort by highest workload reduction within constraints
     within_constraints.sort_values(['wrkld_reduction'], ascending=[False], inplace=True)
     # write to file
@@ -401,11 +425,11 @@ def sort_and_filter_tensor(metrics_tensor, raw_data, max_clean_impurity=0.0, min
 
     return metrics_tensor, within_constraints
 
-def run_ternary_analysis(raw_model_preds, ground_truth_labels, MC=20, nbins=10, lattice_size=50, option='mean_class', OUTDIR='analysis_A_out', init_thresh=0.5,  max_clean_impurity=0.0, min_dirty_impurity=0.95):
+def run_ternary_analysis(raw_model_preds, ground_truth_labels, MC=20, nbins=10, lattice_size=50, option='mean_class', OUTDIR='analysis_A_out', init_thresh=0.5,  max_clean_impurity=0.0, min_dirty_impurity=0.95, min_wrkld_red=0.5):
     # collate model preds, do basic plots
     merged = run_synoptic_analysis(raw_model_preds, ground_truth_labels, MC, nbins, option, OUTDIR, init_thresh)
     # get metrics for each possible split of predictions by eta, theta, tau
     metrics_tensor = ternary_gridpoint_metrics(merged, lattice_size)
     # sort and filter tensor
-    full_tensor, within_constraints = sort_and_filter_tensor(metrics_tensor, merged, max_clean_impurity, min_dirty_impurity, OUTDIR)
+    full_tensor, within_constraints = sort_and_filter_tensor(metrics_tensor, merged, max_clean_impurity, min_dirty_impurity, min_wrkld_red, OUTDIR)
     print(within_constraints.head(1))
