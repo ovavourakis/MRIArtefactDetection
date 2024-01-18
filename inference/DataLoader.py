@@ -49,13 +49,13 @@ for subfolder_name in os.listdir(BASEDIR):
                     # Create a subject from this clean image with torchIO
                     subject = tio.Subject(mri=tio.ScalarImage(image_path))
                     # Generate modified (flipped clean, or artefacted) images 
-                    for modification in modifications:
-                        modified_image = modification(subject)
+                    for modification_name, modification_function in modifications.items():
+                        modified_image = modification_function(subject)
 
                         # 1 - Save its ground truth in the dedicated file along with its id
-                        temp_path = os.path.join(TemporaryDir, f"{subfolder_name}_{modification}_T1W.nii.gz")
+                        temp_path = os.path.join(TemporaryDir, f"{subfolder_name}_{modification_name}_T1W.nii.gz")
                         id = temp_path
-                        gt_score = 0 if str(modification).startswith("flip") else 1
+                        gt_score = 0 if modification_name.startswith("flip") else 1
                         ground_truth_labels.loc[len(ground_truth_labels)] = [id, gt_score] 
 
                         # 2 - Temporarly save the image so it can be re-loaded with nib library
