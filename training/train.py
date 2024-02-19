@@ -89,7 +89,7 @@ class CustomDatasetGenerator(Sequence):
 
     def _apply_modifications(self, img_path):
         # 1 - Checking the extension on the img_path + storing it as extension_name (i.e the modification to apply)
-        extensions = ["Flip", "Scale", "Shift", "Rotate", "RandomAffine", 'RandomElasticDeformation' 
+        extensions = ["CAug", "RandomAffine", 'RandomElasticDeformation' 
           'RandomAnisotropy', 'RescaleIntensity', 'RandomMotion', 'RandomGhosting', 'RandomSpike', 
           'RandomBiasField', 'RandomBlur', 'RandomNoise','RandomSwap', 'RandomGamma']
         extension_name = None 
@@ -107,14 +107,20 @@ class CustomDatasetGenerator(Sequence):
         modified_img = img
 
         # 3 - Defining the modification from extension_name
-        if extension_name == "Flip":
-            modification = random.choice(Flips)
-        elif extension_name == "Scale":
-            modification = random.choice(Scales)
-        elif extension_name == "Shift":
-            modification = random.choice(Shifts)
-        elif extension_name == "Rotate":
-            modification = random.choice(Rotates)
+        if extension_name == "CAug":
+            # 3.1 - Flipping:
+            binary_flip = [np.random.choice([0, 1]) for _ in range(3)]
+            idx_flip = [index for index, value in enumerate(binary_flip) if value == 1]
+            flipping = tio.RandomFlip(axes=idx_flip, flip_probability=1)
+            # 3.2 - Scaling:
+            scaling = tio.RandomAffine(scales=(0.1)) # If only one value: U(1-x, 1+x)
+            # 3.3 - Shifting:
+            shifting = tio.RandomAffine(translation=(0.1)) # If only one value: U(-x, x)
+            # 3.4 - Rotating:
+            rotating = tio.RandomAffine(degrees=(0.1)) # If only one value: U(-x, x) 
+            # 3.5 - Composing the modifications
+            modification = tio.Compose([flipping, scaling, shifting, rotating])
+
         elif extension_name in ["RandomAffine", 'RandomElasticDeformation' 'RandomAnisotropy', 'RescaleIntensity', 
                                 'RandomMotion', 'RandomGhosting', 'RandomSpike', 'RandomBiasField', 'RandomBlur', 
                                 'RandomNoise','RandomSwap', 'RandomGamma']:
