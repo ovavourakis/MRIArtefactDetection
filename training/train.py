@@ -24,6 +24,20 @@ class CustomDatasetGenerator(Sequence):
         self.batch_size = batch_size
         self.target_clean_ratio = target_clean_ratio
         self.target_artef_distro = artef_distro
+        self.Synths = {
+            "RandomAffine": tio.RandomAffine(scales=(1.5, 1.5)), # zooming in the images 
+            "RandomElasticDeformation": tio.RandomElasticDeformation(), # elastic deformation of the images, 
+            "RandomAnisotropy": tio.RandomAnisotropy(), # anisotropic deformation of the images
+            "RescaleIntensity": tio.RescaleIntensity((0.5, 1.5)), # rescaling the intensity of the images
+            "RandomMotion": tio.RandomMotion(), # filling the  𝑘 -space with random rigidly-transformed versions of the original images
+            "RandomGhosting": tio.RandomGhosting(), # removing every  𝑛 th plane from the k-space
+            "RandomSpike": tio.RandomSpike(), # signal peak in  𝑘 -space,
+            "RandomBiasField": tio.RandomBiasField(), # Magnetic field inhomogeneities in the MRI scanner produce low-frequency intensity distortions in the images
+            "RandomBlur": tio.RandomBlur(), # blurring the images
+            "RandomNoise": tio.RandomNoise(), # adding noise to the images
+            "RandomSwap": tio.RandomSwap(), # swapping the phase and magnitude of the images
+            "RandomGamma": tio.RandomGamma() # intensity of the images
+            }
 
         self.clean_img_paths, self.artefacts_img_paths = self._crawl_paths(datadir, datasets, 
                                                                            image_contrasts, image_qualities)
@@ -108,17 +122,12 @@ class CustomDatasetGenerator(Sequence):
 
         # 3 - Defining the modification from extension_name
         if extension_name == "CAug":
-            # 3.1 - Flipping:
             binary_flip = [np.random.choice([0, 1]) for _ in range(3)]
             idx_flip = [index for index, value in enumerate(binary_flip) if value == 1]
             flipping = tio.RandomFlip(axes=idx_flip, flip_probability=1)
-            # 3.2 - Scaling:
             scaling = tio.RandomAffine(scales=(0.1)) # If only one value: U(1-x, 1+x)
-            # 3.3 - Shifting:
             shifting = tio.RandomAffine(translation=(0.1)) # If only one value: U(-x, x)
-            # 3.4 - Rotating:
-            rotating = tio.RandomAffine(degrees=(0.1)) # If only one value: U(-x, x) 
-            # 3.5 - Composing the modifications
+            rotating = tio.RandomAffine(degrees=(10)) # If only one value: U(-x, x) 
             modification = tio.Compose([flipping, scaling, shifting, rotating])
 
         elif extension_name in ["RandomAffine", 'RandomElasticDeformation' 'RandomAnisotropy', 'RescaleIntensity', 
@@ -168,37 +177,19 @@ class CustomDatasetGenerator(Sequence):
 # implement model
 # implement training loop
 # evaluate 
-    
-
-# TorchIO function to generate augmented images by flipping them along the 3 dimensions
-flip_0, flip_1, flip_2 = tio.RandomFlip(axes=[0, 1, 2], flip_probability=1) # 1st dimension, 2nd dimension, 3rd dimension
-flip_0_1 = tio.Compose([flip_0, flip_1]) # 1st & 2nd dimension
-flip_0_2 = tio.Compose([flip_0, flip_2]) # 1st & 3nd dimension
-flip_1_2 = tio.Compose([flip_1, flip_2]) # 2nd & 3rd dimension
-flip_0_1_2 = tio.Compose([flip_0, flip_1, flip_2]) # 1st & 2nd & 3rd dimension
-Flips = [flip_0, flip_1, flip_2, flip_0_1, flip_0_2, flip_1_2, flip_0_1_2]
 
 
-Scales = [] # define here all the scaling we wanna do
-Shifts = []  # define here all the shiftings we wanna do
-Rotates = [] #  define here all the Rotations we wanna do
-
-
-# TorchIO function to generate synthetic images
-RandomAffine = tio.RandomAffine(scales=(1.5, 1.5)) # zooming in the images
-RandomElasticDeformation = tio.RandomElasticDeformation() # elastic deformation of the images
-RandomAnisotropy = tio.RandomAnisotropy() # anisotropic deformation of the images
-RescaleIntensity = tio.RescaleIntensity((0.5, 1.5)) # rescaling the intensity of the images
-RandomMotion = tio.RandomMotion()  # filling the  𝑘 -space with random rigidly-transformed versions of the original images
-RandomGhosting = tio.RandomGhosting() # removing every  𝑛 th plane from the k-space
-RandomSpike = tio.RandomSpike() # signal peak in  𝑘 -space,
-RandomBiasField = tio.RandomBiasField() # Magnetic field inhomogeneities in the MRI scanner produce low-frequency intensity distortions in the images
-RandomBlur = tio.RandomBlur() # blurring the images
-RandomNoise = tio.RandomNoise() # adding noise to the images
-RandomSwap = tio.RandomSwap() # swapping the phase and magnitude of the images
-RandomGamma = tio.RandomGamma() # intensity of the images
-
-Synths = {"RandomAffine": RandomAffine, "RandomElasticDeformation": RandomElasticDeformation, 
-          "RandomAnisotropy": RandomAnisotropy, "RescaleIntensity": RescaleIntensity, "RandomMotion": RandomMotion, 
-          "RandomGhosting": RandomGhosting, "RandomSpike": RandomSpike, "RandomBiasField": RandomBiasField, 
-          "RandomBlur": RandomBlur, "RandomNoise": RandomNoise, "RandomSwap": RandomSwap, "RandomGamma": RandomGamma}
+Synths = {
+    "RandomAffine": tio.RandomAffine(scales=(1.5, 1.5)), # zooming in the images 
+    "RandomElasticDeformation": tio.RandomElasticDeformation(), # elastic deformation of the images, 
+    "RandomAnisotropy": tio.RandomAnisotropy(), # anisotropic deformation of the images
+    "RescaleIntensity": tio.RescaleIntensity((0.5, 1.5)), # rescaling the intensity of the images
+    "RandomMotion": tio.RandomMotion(), # filling the  𝑘 -space with random rigidly-transformed versions of the original images
+    "RandomGhosting": tio.RandomGhosting(), # removing every  𝑛 th plane from the k-space
+    "RandomSpike": tio.RandomSpike(), # signal peak in  𝑘 -space,
+    "RandomBiasField": tio.RandomBiasField(), # Magnetic field inhomogeneities in the MRI scanner produce low-frequency intensity distortions in the images
+    "RandomBlur": tio.RandomBlur(), # blurring the images
+    "RandomNoise": tio.RandomNoise(), # adding noise to the images
+    "RandomSwap": tio.RandomSwap(), # swapping the phase and magnitude of the images
+    "RandomGamma": tio.RandomGamma() # intensity of the images
+    }
