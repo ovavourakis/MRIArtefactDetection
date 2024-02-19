@@ -133,7 +133,7 @@ class CustomDatasetGenerator(Sequence):
         elif extension_name in ["RandomAffine", 'RandomElasticDeformation' 'RandomAnisotropy', 'RescaleIntensity', 
                                 'RandomMotion', 'RandomGhosting', 'RandomSpike', 'RandomBiasField', 'RandomBlur', 
                                 'RandomNoise','RandomSwap', 'RandomGamma']:
-            modification = Synths[extension_name]
+            modification = self.Synths[extension_name]
         
          # 4 - Apply the modification on the modified image and finaly save it to the provided img_path
         modified_img = modification(modified_img)   
