@@ -86,36 +86,45 @@ class CustomDatasetGenerator(Sequence):
             imgs_to_augment = [p+'_synth' for p in random.sample(self.clean_img_paths, num_imgs_to_augment)]
             self.artefacts_img_paths.extend(imgs_to_augment)
 
-    def _apply_modifications(self, img_paths, modifications, artef_distro):
-        modified_paths = []
-        ground_truth_labels = pd.DataFrame(columns=['id', 'gt_score'])
 
-        for path in img_paths: # going through all the images
-            img = tio.ScalarImage(path) # creating a torchIO image from the path
-            modified_img = img
+    def _apply_modifications(self, img_path):
+        # 1 - Checking the extension on the img_path + storing it as extension_name (i.e the modification to apply)
+        extensions = ["Flip", "Scale", "Shift", "Rotate", "RandomAffine", 'RandomElasticDeformation' 
+          'RandomAnisotropy', 'RescaleIntensity', 'RandomMotion', 'RandomGhosting', 'RandomSpike', 
+          'RandomBiasField', 'RandomBlur', 'RandomNoise','RandomSwap', 'RandomGamma']
+        extension_name = None 
+        for extension in extensions:
+            if extension in img_path:
+                extension_name = extension
+                break
 
-            if modifications == flips: # augmentation of image: no augmentation distribution and groud truth score is 0
-                modification_key = random.choice(list(modifications.keys()))
-                modification = modifications[modification_key]
-                gt_score = 0 
-            elif synths == modifications: # corruption of image: modification distribution and groud truth score is 1
-                modification_key = random.choice(list(artef_distro.keys()), p=list(artef_distro.values()))
-                modification = modifications[modification_key]
-                gt_score = 1 
+        if extension_name is None:
+            return
 
-            modified_img = modification(modified_img)
-            # check if needed: modified_img.plot()
-            modified_path = path.replace('.nii', f'_{modification_key}.nii')
-            modified_img.save(modified_path)
-            modified_paths.append(modified_path) 
+        # 2 - Creating a torchIO image from the stripped path
+        stripped_img_path = img_path.replace(f"_{extension_name}.nii", ".nii")        
+        img = tio.ScalarImage(stripped_img_path)
+        modified_img = img
 
-            ground_truth_labels.loc[len(ground_truth_labels)] = [modified_path, gt_score]
-
-        return modified_paths, ground_truth_labels
-    
-    # Then use it this way later in the process: 
-    # flipped_clean_paths = self._apply_modifications(self.clean_img_paths, flips)
-    # synth_artefacts_paths = self._apply_modifications(self.artefacts_img_paths, synths)
+        # 3 - Defining the modification from extension_name
+        if extension_name == "Flip":
+            modification = random.choice(Flips)
+        elif extension_name == "Scale":
+            modification = random.choice(Scales)
+        elif extension_name == "Shift":
+            modification = random.choice(Shifts)
+        elif extension_name == "Rotate":
+            modification = random.choice(Rotates)
+        elif extension_name in ["RandomAffine", 'RandomElasticDeformation' 'RandomAnisotropy', 'RescaleIntensity', 
+                                'RandomMotion', 'RandomGhosting', 'RandomSpike', 'RandomBiasField', 'RandomBlur', 
+                                'RandomNoise','RandomSwap', 'RandomGamma']:
+            modification = Synths[extension_name]
+        
+         # 4 - Apply the modification on the modified image and finaly save it to the provided img_path
+        modified_img = modification(modified_img)   
+        modified_img.save(img_path)
+            
+                
     
     def _get_clean_ratio(self):
         C = len(self.clean_img_paths)
@@ -156,15 +165,17 @@ class CustomDatasetGenerator(Sequence):
     
 
 # TorchIO function to generate augmented images by flipping them along the 3 dimensions
-flip_0 = tio.RandomFlip(axes=0, flip_probability=1) # 1st dimension
-flip_1 = tio.RandomFlip(axes=1, flip_probability=1) # 2nd dimension
-flip_2 = tio.RandomFlip(axes=2, flip_probability=1) # 3rd dimension
+flip_0, flip_1, flip_2 = tio.RandomFlip(axes=[0, 1, 2], flip_probability=1) # 1st dimension, 2nd dimension, 3rd dimension
 flip_0_1 = tio.Compose([flip_0, flip_1]) # 1st & 2nd dimension
 flip_0_2 = tio.Compose([flip_0, flip_2]) # 1st & 3nd dimension
 flip_1_2 = tio.Compose([flip_1, flip_2]) # 2nd & 3rd dimension
 flip_0_1_2 = tio.Compose([flip_0, flip_1, flip_2]) # 1st & 2nd & 3rd dimension
-flips = {"flip_0":flip_0, "flip_1":flip_1, "flip_2":flip_2,"flip_0_1":flip_0_1,
-          "flip_0_2":flip_0_2, "flip_1_2":flip_1_2, "flip_0_1_2":flip_0_1_2}
+Flips = [flip_0, flip_1, flip_2, flip_0_1, flip_0_2, flip_1_2, flip_0_1_2]
+
+
+Scales = [] # define here all the scaling we wanna do
+Shifts = []  # define here all the shiftings we wanna do
+Rotates = [] #  define here all the Rotations we wanna do
 
 
 # TorchIO function to generate synthetic images
@@ -181,8 +192,7 @@ RandomNoise = tio.RandomNoise() # adding noise to the images
 RandomSwap = tio.RandomSwap() # swapping the phase and magnitude of the images
 RandomGamma = tio.RandomGamma() # intensity of the images
 
-synths = {'RandomAffine': RandomAffine, 'RandomElasticDeformation': RandomElasticDeformation, 
-          'RandomAnisotropy': RandomAnisotropy, 'RescaleIntensity': RescaleIntensity, 
-          'RandomMotion': RandomMotion, 'RandomGhosting': RandomGhosting, 'RandomSpike': RandomSpike, 
-          'RandomBiasField': RandomBiasField, 'RandomBlur': RandomBlur, 'RandomNoise': RandomNoise, 
-          'RandomSwap': RandomSwap, 'RandomGamma': RandomGamma}
+Synths = {"RandomAffine": RandomAffine, "RandomElasticDeformation": RandomElasticDeformation, 
+          "RandomAnisotropy": RandomAnisotropy, "RescaleIntensity": RescaleIntensity, "RandomMotion": RandomMotion, 
+          "RandomGhosting": RandomGhosting, "RandomSpike": RandomSpike, "RandomBiasField": RandomBiasField, 
+          "RandomBlur": RandomBlur, "RandomNoise": RandomNoise, "RandomSwap": RandomSwap, "RandomGamma": RandomGamma}
