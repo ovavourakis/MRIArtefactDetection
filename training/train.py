@@ -4,7 +4,7 @@ import torchio as tio
 from keras.utils import Sequence
 from keras.preprocessing.image import load_img, img_to_array
 import math
-from sklearn.model_selection import train_test_split
+
 
 class ImageReader():
     '''
@@ -90,15 +90,17 @@ class DataCrawler():
         self.image_contrasts = image_contrasts
         self.image_qualities = image_qualities
        
-    def _check_inputs(self, datadir, image_contrasts, image_qualities):
+    def _check_inputs(self, datadir, datasets, image_contrasts, image_qualities):
         # do paths to all requested types of images exist?
         assert(os.path.isdir(datadir))
-        for c in image_contrasts:
-            assert(c in ['T1wMPR', 'T1wTIR', 'T2w', 'T2starw', 'FLAIR'])
-            assert(os.path.isdir(os.path.join(datadir, c)))
-            for q in image_qualities:
-                assert(q in ['clean', 'exp_artefacts'])
-                assert(os.path.isdir(os.path.join(datadir, c, q)))
+        for d in datasets:
+            assert(os.path.isdir(os.path.join(datadir, d)))
+            for c in image_contrasts:
+                assert(c in ['T1wMPR', 'T1wTIR', 'T2w', 'T2starw', 'FLAIR'])
+                if os.path.isdir(os.path.join(datadir, c)):
+                    for q in image_qualities:
+                        assert(q in ['clean', 'exp_artefacts'])
+                        assert(os.path.isdir(os.path.join(datadir, c, q)))
 
     def crawl(self):
         # get all the (non-synthetic) image paths
@@ -242,16 +244,17 @@ class DataLoader(Sequence):
         return X, y_true
     
     def on_epoch_end(self):
-        # paths to all images, including synthetic ones
-        clean_img_paths, artefacts_img_paths = self._define_augmentations()
-        # split these images into batches
-        batches, labels = self._def_batches(clean_img_paths, artefacts_img_paths)
+        # re-define augmentations to do for next epoch
+        # get paths to all images, including synthetic ones
+        self.clean_img_paths, self.artefacts_img_paths = self._define_augmentations()
+        # split these new image paths into new random batches
+        self.batches, self.labels = self._def_batches(self.clean_img_paths, self.artefacts_img_paths)
 
-        return clean_img_paths, artefacts_img_paths, batches, labels
+        return self.clean_img_paths, self.artefacts_img_paths, self.batches, self.labels
 
 
 # TODO:
-# pre-determine batches at start of epoch
+# pre-determine batches and corresponding labels at start of epoch
 
 # implement model
 # implement training loop
