@@ -90,7 +90,7 @@ class DataLoader(Sequence):
         self.target_clean_ratio = target_clean_ratio
         self.target_artef_distro = artef_distro
 
-        self.clean_img_paths, self.artefacts_img_paths = self._crawl_paths(datadir, datasets, 
+        self.Clean_img_paths, self.Artefacts_img_paths = self._crawl_paths(datadir, datasets, 
                                                                            image_contrasts, image_qualities)
         self._define_augmentations()
         [random.shuffle(paths) for paths in [self.clean_img_paths, self.artefacts_img_paths]]
@@ -143,7 +143,9 @@ class DataLoader(Sequence):
         '''Generates pathnames for synthetic images to be created in order to reach target clean-ratio.
         Synthetic clean images defined by random {flips, shifts, scales, rotations}.
         Synthetic artefact images defined by transforms drawn from a categorical distro over artefact types.'''
-
+        
+        self.clean_img_paths = self.Clean_img_paths
+        self.clean_img_paths = self.Artefacts_img_paths
         def _pick_augment(path, aug_type='clean'):
             if aug_type=='clean':
                 aug = '_CAug'
@@ -173,14 +175,46 @@ class DataLoader(Sequence):
             augmented_paths = [_pick_augment(path, aug_type='artefact') for path in imgs_to_aug]
             self.artefacts_img_paths.extend(augmented_paths)
 
-    def __getitem__(self):
-        '''Generates a new batch, with associated labels.
-        Makes sure target clean-ratio is maintained in each batch.'''
+    def __def_batches(self):
+        """ Determine batches at start of each epoch:
+        - redefine augmentations 
+        - assign to batches the paths with the repartition we target
+        Makes sure target clean-ratio is maintained in each batch
+        Makes sure all the existing images are used in the epoch
+        """
 
-        # decide on number of clean and artefact images in batch
+        # 1 - Decide on number of clean and artefact images in each batch with the repartition we target
         num_clean = int(self.batch_size * self.target_clean_ratio)
         num_artefacts = self.batch_size - num_clean
+
+        # 2 - Run _define_augmentations
+        self._define_augmentations()
+
+        # 3 - Assign the path to the batches
+        nb_batches = len(self.clean_img_paths + self.artefacts_img_paths) // self.batch_size
+        l = [[] for _ in range(self.nb_batches)]
+
+            # for each batch in l: add to the batch randomly chosen num_clean images from the clean_img_paths without replacement 
+            # same for artefacted images 
+
+
+        # in each batch: assign num_clean clean images and num_artefacts artefact images randomly
+
+
+
+        # creates l = [[paths1, paths2, ...], [pathX, pathX+1, ...]] list of batches
+        # get_item
+        # batches = l[idx]
+        # return batch_paths
+        pass
+
+
+
+    def __getitem__(self,idx):
+        '''Generates the batch, with associated labels.
+        '''
         # decide on specific images to include in batch
+        # TODO: assign the paths to the batches with the repartition we target
         clean_batch = random.sample(self.clean_img_paths, num_clean)
         artefact_batch = random.sample(self.artefacts_img_paths, num_artefacts)
         batch_paths = clean_batch + artefact_batch
@@ -192,6 +226,11 @@ class DataLoader(Sequence):
         y_true = np.array([1]*num_clean + [0]*num_artefacts)
 
         return batch_paths, y_true
+    
+    
+
+
+  
 
         
 
