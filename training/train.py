@@ -205,8 +205,7 @@ class DataLoader(Sequence):
 
     def _def_batches(self, clean_img_paths, artefacts_img_paths):
         """ Determine batches at start of each epoch:
-        - redefine augmentations to do
-        - assign to batches the paths with the repartition we target
+        Assign to batches the paths with the repartition we target
         Makes sure target clean-ratio is maintained in each batch
         Makes sure all the existing images are used in the epoch
         """
@@ -215,7 +214,7 @@ class DataLoader(Sequence):
         num_clean = int(self.batch_size * self.target_clean_ratio)
         num_artefacts = self.batch_size - num_clean
 
-        # 2 - Randomly assign the paths to the batches along with their 
+        # 2 - Randomly assign the paths to the batches along with their labels
         nb_batches = len(clean_img_paths + artefacts_img_paths) // self.batch_size
         random.shuffle(self.clean_img_paths)
         random.shuffle(self.artefacts_img_paths)
@@ -223,8 +222,15 @@ class DataLoader(Sequence):
             self.clean_img_paths[i * num_clean:(i + 1) * num_clean] + self.artefacts_img_paths[i * num_artefacts:(i + 1) * num_artefacts]
             for i in range(nb_batches)
             ]
-        for batch in self.batches:
-            random.shuffle(batch)
+        labels = [[1]*num_clean + [0]*num_artefacts for _ in range(nb_batches)]
+
+        # 3 - Shuffle batch in batches ALONG with their labels
+        for i in range(nb_batches):
+            zipped = list(zip(batches[i], labels[i]))
+            random.shuffle(zipped)
+            batches[i], labels[i] = zip(*zipped)
+            batches[i] = list(batches[i])
+            labels[i] = list(labels[i])
 
         return batches, labels
 
