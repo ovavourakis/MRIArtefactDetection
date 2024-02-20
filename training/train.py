@@ -3,6 +3,8 @@ import numpy as np
 import torchio as tio
 from keras.utils import Sequence
 from keras.preprocessing.image import load_img, img_to_array
+import math
+from sklearn.model_selection import train_test_split
 
 class ImageReader():
     '''
@@ -75,31 +77,19 @@ class ImageReader():
         img = self.preprocess(img) # re-orient, normalise, crop/pad
         return img # numpy array
 
-class DataLoader(Sequence):
+class DataCrawler():
     """
-    Dataloader for training the model. 
-    Handles data augmentation and synthetic artefact generation.
+    Crawls the dataset directories and returns a list of clean/artefact 
+    image paths with labels.
     """
 
-    def __init__(self, datadir, datasets, image_contrasts, image_qualities, 
-                 target_clean_ratio, artef_distro, batch_size):
-        
-        self._check_inputs(datadir, image_contrasts, image_qualities, artef_distro, target_clean_ratio)
-
-        self.batch_size = batch_size
-        self.target_clean_ratio = target_clean_ratio
-        self.target_artef_distro = artef_distro
-
-        self.Clean_img_paths, self.Artefacts_img_paths = self._crawl_paths(datadir, datasets, 
-                                                                           image_contrasts, image_qualities)
-        self._define_augmentations()
-        [random.shuffle(paths) for paths in [self.clean_img_paths, self.artefacts_img_paths]]
-
-        self.clean_ratio = self._get_clean_ratio()
-        self.reader = ImageReader(input_size=(256,256,64))
-
-    def _check_inputs(self, datadir, image_contrasts, image_qualities, artef_distro, target_clean_ratio):
-        assert(target_clean_ratio >= 0 and target_clean_ratio <= 1)
+    def __init__(self, datadir, datasets, image_contrasts, image_qualities):
+        self._check_inputs(datadir, image_contrasts, image_qualities)
+        self.datasets = datasets
+        self.image_contrasts = image_contrasts
+        self.image_qualities = image_qualities
+       
+    def _check_inputs(self, datadir, image_contrasts, image_qualities):
         # do paths to all requested types of images exist?
         assert(os.path.isdir(datadir))
         for c in image_contrasts:
@@ -108,6 +98,53 @@ class DataLoader(Sequence):
             for q in image_qualities:
                 assert(q in ['clean', 'exp_artefacts'])
                 assert(os.path.isdir(os.path.join(datadir, c, q)))
+
+    def crawl(self):
+        # get all the (non-synthetic) image paths
+        clean_img_paths = []
+        artefacts_img_paths = []
+        for d in self.datasets:
+            for c in self.image_contrasts:
+                for q in self.image_qualities:
+                    path = os.path.join(d, c, q)
+                    images = os.listdir(path)
+                    img_paths = [os.path.join(path, i) for i in images]
+                    if q == 'clean':
+                        clean_img_paths.extend(img_paths)
+                    else:
+                        artefacts_img_paths.extend(img_paths)
+        # define the appropriate labels
+        num_clean = len(clean_img_paths)
+        num_artefacts = len(artefacts_img_paths)
+        y_true = np.array([1]*num_clean + [0]*num_artefacts)
+
+        return clean_img_paths + artefacts_img_paths, y_true
+
+class DataLoader(Sequence):
+    """
+    Dataloader for training the model. 
+    Handles data augmentation and synthetic artefact generation.
+    """
+
+    def __init__(self, Xpaths, y_true, target_clean_ratio, artef_distro, batch_size):
+        self._check_inputs(Xpaths, y_true, artef_distro, target_clean_ratio)
+
+        self.batch_size = batch_size; 
+        self.target_clean_ratio = target_clean_ratio
+        self.target_artef_distro = artef_distro
+
+        clean_idx, artefact_idx = np.where(y_true == 1)[0], np.where(y_true == 0)[0]
+        self.Clean_img_paths, self.Artefacts_img_paths = Xpaths[clean_idx], Xpaths[artefact_idx]
+
+        self._define_augmentations()
+        [random.shuffle(paths) for paths in [self.clean_img_paths, self.artefacts_img_paths]]
+
+        self.clean_ratio = self._get_clean_ratio()
+        self.reader = ImageReader(input_size=(256,256,64))
+
+    def _check_inputs(self, Xpaths, y_true, artef_distro, target_clean_ratio):
+        assert(len(Xpaths) == len(y_true))
+        assert(target_clean_ratio >= 0 and target_clean_ratio <= 1)
         # artef_distro defines a categorical probability distribution over (synthetic) artefact types
         assert(isinstance(artef_distro, dict))
         assert(sum(artef_distro.values()) == 1)
@@ -117,26 +154,10 @@ class DataLoader(Sequence):
                          'RandomMotion', 'RandomGhosting', 'RandomSpike', 'RandomBiasField', 'RandomBlur', 
                          'RandomNoise', 'RandomSwap', 'RandomGamma'])
 
-    def _crawl_paths(self, datadir, datasets, image_contrasts, image_qualities):
-        # get all the (non-synthetic) image paths
-        clean_img_paths = []
-        artefacts_img_paths = []
-        for d in datasets:
-            for c in image_contrasts:
-                for q in image_qualities:
-                    path = os.path.join(d, c, q)
-                    images = os.listdir(path)
-                    img_paths = [os.path.join(path, i) for i in images]
-                    if q == 'clean':
-                        clean_img_paths.extend(img_paths)
-                    else:
-                        artefacts_img_paths.extend(img_paths)
-        return clean_img_paths, artefacts_img_paths
-
     def _get_clean_ratio(self):
         # calculate fraction of clean images (among non-synthetic data)
-        C = len(self.clean_img_paths)
-        T = C + len(self.artefacts_img_paths)
+        C = len(self.Clean_img_paths)
+        T = C + len(self.Artefacts_img_paths)
         return C/T, C, T
     
     def _define_augmentations(self):
@@ -175,7 +196,10 @@ class DataLoader(Sequence):
             augmented_paths = [_pick_augment(path, aug_type='artefact') for path in imgs_to_aug]
             self.artefacts_img_paths.extend(augmented_paths)
 
-    def __def_batches(self):
+    def __len__(self):
+        return math.ceil((len(self.clean_img_paths)+len(self.artefacts_img_paths)) // self.batch_size)
+
+    def __def_batches(self, idx):
         """ Determine batches at start of each epoch:
         - redefine augmentations 
         - assign to batches the paths with the repartition we target
@@ -192,20 +216,21 @@ class DataLoader(Sequence):
 
         # 3 - Assign the path to the batches
         nb_batches = len(self.clean_img_paths + self.artefacts_img_paths) // self.batch_size
-        l = [[] for _ in range(self.nb_batches)]
+        self.batches = [[] for _ in range(self.nb_batches)]
 
             # for each batch in l: add to the batch randomly chosen num_clean images from the clean_img_paths without replacement 
             # same for artefacted images 
 
 
         # in each batch: assign num_clean clean images and num_artefacts artefact images randomly
-
+        # TODO: assign the paths to the batches with the repartition we target
+        clean_batch = random.sample(self.clean_img_paths, num_clean)
+        artefact_batch = random.sample(self.artefacts_img_paths, num_artefacts)
+        batch_paths = clean_batch + artefact_batch
 
 
         # creates l = [[paths1, paths2, ...], [pathX, pathX+1, ...]] list of batches
-        # get_item
-        # batches = l[idx]
-        # return batch_paths
+
         pass
 
 
@@ -213,11 +238,6 @@ class DataLoader(Sequence):
     def __getitem__(self,idx):
         '''Generates the batch, with associated labels.
         '''
-        # decide on specific images to include in batch
-        # TODO: assign the paths to the batches with the repartition we target
-        clean_batch = random.sample(self.clean_img_paths, num_clean)
-        artefact_batch = random.sample(self.artefacts_img_paths, num_artefacts)
-        batch_paths = clean_batch + artefact_batch
         # read in the images and apply pre-processing
         batch_images = [self.reader.read_image(path) for path in batch_paths]
         X = np.array([img.data for img in batch_images])
@@ -255,7 +275,7 @@ class DataLoader(Sequence):
 
 # TODO:
 # pre-determine batches at start of epoch
-# re-define augmentations at start of each epoch
+# re-define augmentations at start of each epoch 
 
 # implement model
 # implement training loop
