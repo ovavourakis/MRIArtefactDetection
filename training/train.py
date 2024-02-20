@@ -9,7 +9,8 @@ from sklearn.model_selection import train_test_split
 class ImageReader():
     '''
     Class to read and preprocess images from disk.
-    Handles image loading, resizing, normalisation, padding.
+    Handles image loading, synthetic augmentation and 
+    preprocessing (resizing, normalisation, padding etc.).
     '''
 
     def __init__(self, input_size=(256,256,64)):
@@ -73,7 +74,7 @@ class ImageReader():
         return modified_img
 
     def read_image(self, path):
-        img = self._apply_modifications(path) # introduce artefacts, if need be
+        img = self._apply_modifications(path) # introduce artefacts, if specified in path_name
         img = self.preprocess(img) # re-orient, normalise, crop/pad
         return img # numpy array
 
@@ -122,8 +123,8 @@ class DataCrawler():
 
 class DataLoader(Sequence):
     """
-    Dataloader for training the model. 
-    Handles data augmentation and synthetic artefact generation.
+    Dataloader for an image dataset.
+    Pre-defines augmentations to be performed in order to reach a target clean-ratio.
     """
 
     def __init__(self, Xpaths, y_true, target_clean_ratio, artef_distro, batch_size):
@@ -134,12 +135,13 @@ class DataLoader(Sequence):
         self.target_artef_distro = artef_distro
 
         clean_idx, artefact_idx = np.where(y_true == 1)[0], np.where(y_true == 0)[0]
+        # paths to just the *real* images
         self.Clean_img_paths, self.Artefacts_img_paths = Xpaths[clean_idx], Xpaths[artefact_idx]
-
-        self._define_augmentations()
-        [random.shuffle(paths) for paths in [self.clean_img_paths, self.artefacts_img_paths]]
-
         self.clean_ratio = self._get_clean_ratio()
+
+        # paths to all images, including synthetic ones; split into batches
+        self.clean_img_paths, self.artefacts_img_paths, self.batches = self.on_epoch_end()
+
         self.reader = ImageReader(input_size=(256,256,64))
 
     def _check_inputs(self, Xpaths, y_true, artef_distro, target_clean_ratio):
@@ -165,8 +167,6 @@ class DataLoader(Sequence):
         Synthetic clean images defined by random {flips, shifts, scales, rotations}.
         Synthetic artefact images defined by transforms drawn from a categorical distro over artefact types.'''
         
-        self.clean_img_paths = self.Clean_img_paths
-        self.clean_img_paths = self.Artefacts_img_paths
         def _pick_augment(path, aug_type='clean'):
             if aug_type=='clean':
                 aug = '_CAug'
@@ -180,26 +180,30 @@ class DataLoader(Sequence):
             return name + aug + ext
         
         clean_ratio, cleans, total = self._get_clean_ratio()
-
+        clean_img_paths = self.Clean_img_paths
+        artefacts_img_paths = self.Artefacts_img_paths
+    
         if clean_ratio < self.target_clean_ratio:
             # oversample clean images with random {flips, shifts, 10% scales, rotations} 
             # until desired clean-ratio is reached
             num_imgs_to_aug = int( (total*self.target_clean_ratio - cleans) / (1-self.target_clean_ratio))
-            imgs_to_aug = random.sample(self.clean_img_paths, num_imgs_to_aug)
+            imgs_to_aug = random.sample(clean_img_paths, num_imgs_to_aug)
             augmented_paths = [_pick_augment(path, aug_type='clean') for path in imgs_to_aug]
-            self.clean_img_paths.extend(augmented_paths)
+            clean_img_paths.extend(augmented_paths)
         elif clean_ratio > self.target_clean_ratio:
             # create synthetic artefacts until desired clean-ratio is reached
             # pick aigmentations from categorcical distro over transform functions of TorchIO
             num_imgs_to_aug = cleans/self.target_clean_ratio - total
-            imgs_to_aug = random.sample(self.clean_img_paths, num_imgs_to_aug)
+            imgs_to_aug = random.sample(clean_img_paths, num_imgs_to_aug)
             augmented_paths = [_pick_augment(path, aug_type='artefact') for path in imgs_to_aug]
-            self.artefacts_img_paths.extend(augmented_paths)
+            artefacts_img_paths.extend(augmented_paths)
+        
+        return clean_img_paths, artefacts_img_paths
 
     def __len__(self):
         return math.ceil((len(self.clean_img_paths)+len(self.artefacts_img_paths)) // self.batch_size)
 
-    def __def_batches(self, idx):
+    def _def_batches(self):
         """ Determine batches at start of each epoch:
         - redefine augmentations 
         - assign to batches the paths with the repartition we target
@@ -233,49 +237,30 @@ class DataLoader(Sequence):
 
         pass
 
-
-
-    def __getitem__(self,idx):
-        '''Generates the batch, with associated labels.
+    def __getitem__(self, idx):
         '''
-        # read in the images and apply pre-processing
-        batch_images = [self.reader.read_image(path) for path in batch_paths]
+        Returns a batch, with associated labels.
+        '''
+        # read in the images, augment with artefacts as neccessary, then apply pre-processing
+        batch_images = [self.reader.read_image(path) for path in self.batches[idx]]
         X = np.array([img.data for img in batch_images])
         
-        # generate labels: 1 for clean, 0 for artefact
-        y_true = np.array([1]*num_clean + [0]*num_artefacts)
+        # also get appropriate labels
+        y_true = self.labels[idx]
 
-        return batch_paths, y_true
+        return X, y_true
     
-    
+    def on_epoch_end(self):
+        # paths to all images, including synthetic ones
+        clean_img_paths, artefacts_img_paths = self._define_augmentations()
+        # split these images into batches
+        batches = self._def_batches()
 
-
-  
-
-        
-
-
-
-    # def _get_image_paths(self):
-    #     num_exp_artefacts = 0
-    #     np.random.shuffle(self.image_paths)
-    #     return num_exp_artefacts / len(self.image_paths)
-
-    # def __len__(self):
-    #     return len(self.image_paths) // self.batch_size
-
-    # def __getitem__(self, idx):
-    #     batch_paths = self.image_paths[idx*self.batch_size:(idx+1)*self.batch_size]
-    #     batch_images = np.array([img_to_array(load_img(path)) for path in batch_paths])
-    #     return batch_images
-
-    # def on_epoch_end(self):
-    #     np.random.shuffle(self.image_paths)
+        return clean_img_paths, artefacts_img_paths, batches
 
 
 # TODO:
 # pre-determine batches at start of epoch
-# re-define augmentations at start of each epoch 
 
 # implement model
 # implement training loop
