@@ -1,18 +1,85 @@
 import os, random
 import numpy as np
+import torchio as tio
 from keras.utils import Sequence
 from keras.preprocessing.image import load_img, img_to_array
 
+class ImageReader():
+    '''
+    Class to read and preprocess images from disk.
+    Handles image loading, resizing, normalisation, padding.
+    '''
 
-# pick random image from clean images
-# pick random augmentation from categorical distribution
-# apply augmentation to image
-# write image to temporary file
-# add path to temporary file to self.tmp_img_paths
+    def __init__(self, input_size=(256,256,64)):
+        self.input_size = input_size
+        self.Synths = {
+            "RandomAffine": tio.RandomAffine(scales=(1.5, 1.5)),        # zooming in the images 
+            "RandomElasticDeformation": tio.RandomElasticDeformation(), # elastic deformation of the images, 
+            "RandomAnisotropy": tio.RandomAnisotropy(),                 # anisotropic deformation of the images
+            "RescaleIntensity": tio.RescaleIntensity((0.5, 1.5)),       # rescaling the intensity of the images
+            "RandomMotion": tio.RandomMotion(),                         # filling the  𝑘 -space with random rigidly-transformed versions of the original images
+            "RandomGhosting": tio.RandomGhosting(),                     # removing every  𝑛 th plane from the k-space
+            "RandomSpike": tio.RandomSpike(),                           # signal peak in  𝑘 -space,
+            "RandomBiasField": tio.RandomBiasField(),                   # Magnetic field inhomogeneities in the MRI scanner produce low-frequency intensity distortions in the images
+            "RandomBlur": tio.RandomBlur(),                             # blurring the images
+            "RandomNoise": tio.RandomNoise(),                           # adding noise to the images
+            "RandomSwap": tio.RandomSwap(),                             # swapping the phase and magnitude of the images
+            "RandomGamma": tio.RandomGamma()                            # intensity of the images
+        }
+        # pre-processing
+        self.orient = tio.transforms.ToCanonical()                  # RAS+; TODO: might make pre-trained weights useless
+        self.normalise = tio.transforms.ZNormalization()            # TODO: consider histogram normalisation instead
+        self.crop_pad = tio.transforms.CropOrPad(self.input_size)   # TODO: consider re-sampling instead, or in addition
+        self.preprocess = tio.Compose([self.orient, self.normalise, self.crop_pad])
 
-# also give option to augment by flipping or rotating
+    def _apply_modifications(self, img_path):
+        # 1 - Checking the extension on the img_path + storing it as extension_name (i.e the modification to apply)
+        extensions = ["CAug", "RandomAffine", 'RandomElasticDeformation' 
+          'RandomAnisotropy', 'RescaleIntensity', 'RandomMotion', 'RandomGhosting', 'RandomSpike', 
+          'RandomBiasField', 'RandomBlur', 'RandomNoise','RandomSwap', 'RandomGamma']
+        extension_name = None 
+        for extension in extensions:
+            if extension in img_path:
+                extension_name = extension
+                break
+        
+         # 2 - Creating a torchIO image from the path
+        if extension_name is None: # no modification to be applied
+            img = tio.ScalarImage(img_path)
+            return img
+        stripped_img_path = img_path.replace(f"_{extension_name}.nii", ".nii")        
+        img = tio.ScalarImage(stripped_img_path)
+        
+        # 3 - Defining the modification from extension_name
+        if extension_name == "CAug":
+            binary_flip = [np.random.choice([0, 1]) for _ in range(3)]
+            idx_flip = [index for index, value in enumerate(binary_flip) if value == 1]
+            flipping = tio.RandomFlip(axes=idx_flip, flip_probability=1)
+            scaling = tio.RandomAffine(scales=(0.1)) # If only one value: U(1-x, 1+x)
+            shifting = tio.RandomAffine(translation=(0.1)) # If only one value: U(-x, x)
+            rotating = tio.RandomAffine(degrees=(10)) # If only one value: U(-x, x) 
+            modification = tio.Compose([flipping, scaling, shifting, rotating])
 
-class CustomDatasetGenerator(Sequence):
+        elif extension_name in ["RandomAffine", 'RandomElasticDeformation' 'RandomAnisotropy', 'RescaleIntensity', 
+                                'RandomMotion', 'RandomGhosting', 'RandomSpike', 'RandomBiasField', 'RandomBlur', 
+                                'RandomNoise','RandomSwap', 'RandomGamma']:
+            modification = self.Synths[extension_name]
+        
+         # 4 - Apply the modification on the modified image and return modified version
+        modified_img = modification(img)   
+        # modified_img.save(img_path)
+        return modified_img
+
+    def read_image(self, path):
+        img = self._apply_modifications(path) # introduce artefacts, if need be
+        img = self.preprocess(img) # re-orient, normalise, crop/pad
+        return img # numpy array
+
+class DataLoader(Sequence):
+    """
+    Dataloader for training the model. 
+    Handles data augmentation and synthetic artefact generation.
+    """
 
     def __init__(self, datadir, datasets, image_contrasts, image_qualities, 
                  target_clean_ratio, artef_distro, batch_size):
@@ -29,6 +96,7 @@ class CustomDatasetGenerator(Sequence):
         [random.shuffle(paths) for paths in [self.clean_img_paths, self.artefacts_img_paths]]
 
         self.clean_ratio = self._get_clean_ratio()
+        self.reader = ImageReader(input_size=(256,256,64))
 
     def _check_inputs(self, datadir, image_contrasts, image_qualities, artef_distro, target_clean_ratio):
         assert(target_clean_ratio >= 0 and target_clean_ratio <= 1)
@@ -65,36 +133,68 @@ class CustomDatasetGenerator(Sequence):
                         artefacts_img_paths.extend(img_paths)
         return clean_img_paths, artefacts_img_paths
 
-    def _define_augmentations(self):
-         # calculate fraction of clean images (among non-synthetic data)
+    def _get_clean_ratio(self):
+        # calculate fraction of clean images (among non-synthetic data)
         C = len(self.clean_img_paths)
         T = C + len(self.artefacts_img_paths)
-        clean_ratio = C / T
+        return C/T, C, T
+    
+    def _define_augmentations(self):
+        '''Generates pathnames for synthetic images to be created in order to reach target clean-ratio.
+        Synthetic clean images defined by random {flips, shifts, scales, rotations}.
+        Synthetic artefact images defined by transforms drawn from a categorical distro over artefact types.'''
+
+        def _pick_augment(path, aug_type='clean'):
+            if aug_type=='clean':
+                aug = '_CAug'
+            elif aug_type=='artefact':
+                augs = list(self.target_artef_distro.keys())
+                probs = list(self.target_artef_distro.values())
+                aug = np.random.choice(augs, size = 1, p = probs)
+            else:
+                raise ValueError('aug_type must be either "clean" or "artefact"')
+            name, ext = os.path.splitext(path)
+            return name + aug + ext
+        
+        clean_ratio, cleans, total = self._get_clean_ratio()
 
         if clean_ratio < self.target_clean_ratio:
-            # oversample clean images with random flips until desired clean-ratio is reached
-            numer = C*(1-self.target_clean_ratio)-self.target_clean_ratio*(T-C)
-            denom = self.target_clean_ratio-1
-            num_imgs_to_flip = int(numer / denom)
-            imgs_to_flip = [p+'_flip' for p in random.sample(self.clean_img_paths, num_imgs_to_flip)]
-            self.clean_img_paths.extend(imgs_to_flip)
+            # oversample clean images with random {flips, shifts, 10% scales, rotations} 
+            # until desired clean-ratio is reached
+            num_imgs_to_aug = int( (total*self.target_clean_ratio - cleans) / (1-self.target_clean_ratio))
+            imgs_to_aug = random.sample(self.clean_img_paths, num_imgs_to_aug)
+            augmented_paths = [_pick_augment(path, aug_type='clean') for path in imgs_to_aug]
+            self.clean_img_paths.extend(augmented_paths)
         elif clean_ratio > self.target_clean_ratio:
             # create synthetic artefacts until desired clean-ratio is reached
-            num_imgs_to_augment = C/self.target_clean_ratio - T
-            imgs_to_augment = [p+'_synth' for p in random.sample(self.clean_img_paths, num_imgs_to_augment)]
-            self.artefacts_img_paths.extend(imgs_to_augment)
-    
-    def _get_clean_ratio(self):
-        C = len(self.clean_img_paths)
-        T = C + len(self.artefacts_img_paths)
-        return C / T
+            # pick aigmentations from categorcical distro over transform functions of TorchIO
+            num_imgs_to_aug = cleans/self.target_clean_ratio - total
+            imgs_to_aug = random.sample(self.clean_img_paths, num_imgs_to_aug)
+            augmented_paths = [_pick_augment(path, aug_type='artefact') for path in imgs_to_aug]
+            self.artefacts_img_paths.extend(augmented_paths)
 
-    def _batch_generator(self):
-        pass # TODO
+    def __getitem__(self):
+        '''Generates a new batch, with associated labels.
+        Makes sure target clean-ratio is maintained in each batch.'''
 
-    def __getitem__(self, idx):
-        'Generates one batch of data'
-        pass # TODO
+        # decide on number of clean and artefact images in batch
+        num_clean = int(self.batch_size * self.target_clean_ratio)
+        num_artefacts = self.batch_size - num_clean
+        # decide on specific images to include in batch
+        clean_batch = random.sample(self.clean_img_paths, num_clean)
+        artefact_batch = random.sample(self.artefacts_img_paths, num_artefacts)
+        batch_paths = clean_batch + artefact_batch
+        # read in the images and apply pre-processing
+        batch_images = [self.reader.read_image(path) for path in batch_paths]
+        X = np.array([img.data for img in batch_images])
+        
+        # generate labels: 1 for clean, 0 for artefact
+        y_true = np.array([1]*num_clean + [0]*num_artefacts)
+
+        return batch_paths, y_true
+
+        
+
 
 
     # def _get_image_paths(self):
@@ -115,8 +215,11 @@ class CustomDatasetGenerator(Sequence):
 
 
 # TODO:
-# read/create dataset
-# implement augmentations in DataLoader
+# pre-determine batches at start of epoch
+# re-define augmentations at start of each epoch
+
 # implement model
 # implement training loop
+#      * train first on small batches with 50/50
+#      * gradually increase batch size and clean ratio
 # evaluate 
