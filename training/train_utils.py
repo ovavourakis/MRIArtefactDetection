@@ -238,8 +238,7 @@ class DataLoader(Sequence):
 
 
     def __getitem__(self,idx):
-        '''Generates the batch, with associated labels.
-        '''
+        '''Generates the batch, with associated labels.'''
         # read in the images, augment with artefacts as neccessary, then apply pre-processing
         batch_images = [self.reader.read_image(path) for path in self.batches[idx]]
         X = np.array([img.data for img in batch_images])
@@ -260,8 +259,6 @@ class DataLoader(Sequence):
 
 
 # TODO:
-# pre-determine batches and corresponding labels at start of epoch
-
 # implement model
 # implement training loop
 #      * train first on small batches with 50/50
