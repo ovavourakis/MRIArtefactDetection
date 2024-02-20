@@ -166,7 +166,7 @@ class DataLoader(Sequence):
         Synthetic artefact images defined by transforms drawn from a categorical distro over artefact types.'''
         
         self.clean_img_paths = self.Clean_img_paths
-        self.clean_img_paths = self.Artefacts_img_paths
+        self.artefacts_img_paths = self.Artefacts_img_paths
         def _pick_augment(path, aug_type='clean'):
             if aug_type=='clean':
                 aug = '_CAug'
@@ -201,7 +201,7 @@ class DataLoader(Sequence):
 
     def __def_batches(self, idx):
         """ Determine batches at start of each epoch:
-        - redefine augmentations 
+        - redefine augmentations to do
         - assign to batches the paths with the repartition we target
         Makes sure target clean-ratio is maintained in each batch
         Makes sure all the existing images are used in the epoch
@@ -214,25 +214,17 @@ class DataLoader(Sequence):
         # 2 - Run _define_augmentations
         self._define_augmentations()
 
-        # 3 - Assign the path to the batches
+        # 3 - Randomly assign the paths to the batches
         nb_batches = len(self.clean_img_paths + self.artefacts_img_paths) // self.batch_size
-        self.batches = [[] for _ in range(self.nb_batches)]
-
-            # for each batch in l: add to the batch randomly chosen num_clean images from the clean_img_paths without replacement 
-            # same for artefacted images 
-
-
-        # in each batch: assign num_clean clean images and num_artefacts artefact images randomly
-        # TODO: assign the paths to the batches with the repartition we target
-        clean_batch = random.sample(self.clean_img_paths, num_clean)
-        artefact_batch = random.sample(self.artefacts_img_paths, num_artefacts)
-        batch_paths = clean_batch + artefact_batch
-
-
-        # creates l = [[paths1, paths2, ...], [pathX, pathX+1, ...]] list of batches
-
-        pass
-
+        self.batches = [[] for _ in range(nb_batches)]
+        random.shuffle(self.clean_img_paths)
+        random.shuffle(self.artefacts_img_paths)
+        self.batches = [
+            self.clean_img_paths[i * num_clean:(i + 1) * num_clean] + self.artefacts_img_paths[i * num_artefacts:(i + 1) * num_artefacts]
+            for i in range(nb_batches)
+            ]
+        for batch in self.batches:
+            random.shuffle(batch)
 
 
     def __getitem__(self,idx):
