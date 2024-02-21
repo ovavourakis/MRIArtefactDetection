@@ -1,10 +1,8 @@
-import os, random
+import os, random, math
 import numpy as np
+import tensorflow as tf
 import torchio as tio
 from keras.utils import Sequence
-from keras.preprocessing.image import load_img, img_to_array
-import math
-
 
 class ImageReader():
     '''
@@ -30,7 +28,7 @@ class ImageReader():
             "RandomGamma": tio.RandomGamma()                            # intensity of the images
         }
         # pre-processing
-        self.orient = tio.transforms.ToCanonical()                  # RAS+; TODO: might make pre-trained weights useless
+        self.orient = tio.transforms.ToCanonical()                  # RAS+ orientation
         self.normalise = tio.transforms.ZNormalization()            # TODO: consider histogram normalisation instead
         self.crop_pad = tio.transforms.CropOrPad(self.input_size)   # TODO: consider re-sampling instead, or in addition
         self.preprocess = tio.Compose([self.orient, self.normalise, self.crop_pad])
@@ -50,7 +48,7 @@ class ImageReader():
         if extension_name is None: # no modification to be applied
             img = tio.ScalarImage(img_path)
             return img
-        stripped_img_path = img_path.replace(f"_{extension_name}.nii", ".nii")        
+        stripped_img_path = img_path.replace(f"_{extension_name}.nii", ".nii")   
         img = tio.ScalarImage(stripped_img_path)
         
         # 3 - Defining the modification from extension_name
@@ -85,7 +83,8 @@ class DataCrawler():
     """
 
     def __init__(self, datadir, datasets, image_contrasts, image_qualities):
-        self._check_inputs(datadir, image_contrasts, image_qualities)
+        self._check_inputs(datadir, datasets, image_contrasts, image_qualities)
+        self.datadir = datadir
         self.datasets = datasets
         self.image_contrasts = image_contrasts
         self.image_qualities = image_qualities
@@ -109,7 +108,7 @@ class DataCrawler():
         for d in self.datasets:
             for c in self.image_contrasts:
                 for q in self.image_qualities:
-                    path = os.path.join(d, c, q)
+                    path = os.path.join(self.datadir, d, c, q)
                     images = os.listdir(path)
                     img_paths = [os.path.join(path, i) for i in images]
                     if q == 'clean':
@@ -135,10 +134,12 @@ class DataLoader(Sequence):
         self.batch_size = batch_size; 
         self.target_clean_ratio = target_clean_ratio
         self.target_artef_distro = artef_distro
+        self.num_classes = len(np.unique(y_true))
 
         clean_idx, artefact_idx = np.where(y_true == 1)[0], np.where(y_true == 0)[0]
         # paths to just the *real* images
-        self.Clean_img_paths, self.Artefacts_img_paths = Xpaths[clean_idx], Xpaths[artefact_idx]
+        self.Clean_img_paths = [Xpaths[i] for i in clean_idx]
+        self.Artefacts_img_paths = [Xpaths[i] for i in artefact_idx]
         self.clean_ratio = self._get_clean_ratio()
 
         # paths to all images, including synthetic ones; split into batches
@@ -178,8 +179,9 @@ class DataLoader(Sequence):
                 aug = np.random.choice(augs, size = 1, p = probs)
             else:
                 raise ValueError('aug_type must be either "clean" or "artefact"')
-            name, ext = os.path.splitext(path)
-            return name + aug + ext
+            dir, file = os.path.split(path)
+            fname, ext = file.split('.', 1) # just the first dot, so we don't split extensions like .nii.gz
+            return os.path.join(dir, fname) + aug + '.' + ext
         
         clean_ratio, cleans, total = self._get_clean_ratio()
         clean_img_paths = self.Clean_img_paths
@@ -189,14 +191,14 @@ class DataLoader(Sequence):
             # oversample clean images with random {flips, shifts, 10% scales, rotations} 
             # until desired clean-ratio is reached
             num_imgs_to_aug = int( (total*self.target_clean_ratio - cleans) / (1-self.target_clean_ratio))
-            imgs_to_aug = random.sample(clean_img_paths, num_imgs_to_aug)
+            imgs_to_aug = random.choices(clean_img_paths, k=num_imgs_to_aug)
             augmented_paths = [_pick_augment(path, aug_type='clean') for path in imgs_to_aug]
             clean_img_paths.extend(augmented_paths)
         elif clean_ratio > self.target_clean_ratio:
             # create synthetic artefacts until desired clean-ratio is reached
             # pick aigmentations from categorcical distro over transform functions of TorchIO
             num_imgs_to_aug = cleans/self.target_clean_ratio - total
-            imgs_to_aug = random.sample(clean_img_paths, num_imgs_to_aug)
+            imgs_to_aug = random.choices(clean_img_paths, k=num_imgs_to_aug)
             augmented_paths = [_pick_augment(path, aug_type='artefact') for path in imgs_to_aug]
             artefacts_img_paths.extend(augmented_paths)
         
@@ -236,17 +238,17 @@ class DataLoader(Sequence):
 
         return batches, labels
 
-
     def __getitem__(self,idx):
         '''Generates the batch, with associated labels.'''
         # read in the images, augment with artefacts as neccessary, then apply pre-processing
         batch_images = [self.reader.read_image(path) for path in self.batches[idx]]
-        X = np.array([img.data for img in batch_images])
+        X = np.stack([np.squeeze(img.data.numpy()) for img in batch_images], axis = 0)
         
         # also get appropriate labels
         y_true = self.labels[idx]
+        y_one_hot = tf.one_hot(y_true, depth=self.num_classes)
 
-        return X, y_true
+        return X, y_one_hot
     
     def on_epoch_end(self):
         # re-define augmentations to do for next epoch
@@ -259,8 +261,8 @@ class DataLoader(Sequence):
 
 
 # TODO:
-# implement model
-# implement training loop
+# tinker with the model and input shapes - consider what's best for arbitrary datasets
+# implement proper training loop
 #      * train first on small batches with 50/50
 #      * gradually increase batch size and clean ratio
 # evaluate 
