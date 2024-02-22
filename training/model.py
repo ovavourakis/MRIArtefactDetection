@@ -1,9 +1,8 @@
 from keras.models import Model
 from keras.layers import Dense, Dropout, Activation, Flatten, BatchNormalization
 from keras.layers import Conv3D, MaxPooling3D, Input
-from keras.metrics import AUC
 
-def getConvNet(out_classes=2,input_shape=(256,256,64)):
+def getConvNet(out_classes=2,input_shape=(256,256,64,1)):
     inp = Input(input_shape)
 
     # 256 x 256 x 64 x 1
@@ -64,8 +63,6 @@ def getConvNet(out_classes=2,input_shape=(256,256,64)):
     # 8 x 8 x 2 x 128
     # x = Dropout(0.25)(x) # x = Dropout(0.25)(x,training=True)
     x = Flatten()(x)
-
-    print(x.shape)
     
     # 16384 x 1
     x = Dense(128,name='dense_pre')(x)
@@ -77,8 +74,5 @@ def getConvNet(out_classes=2,input_shape=(256,256,64)):
     out = Dense(out_classes, name='dense_post', activation='softmax')(x)
 
     model = Model(inputs=inp, outputs=out)
-    model.compile(loss='categorical_crossentropy', optimizer='nadam', 
-                  metrics=['accuracy', AUC(curve='ROC'), AUC(curve='PR')])
-    print(model.summary())
 
     return model

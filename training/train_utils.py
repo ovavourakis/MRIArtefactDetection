@@ -3,6 +3,7 @@ import numpy as np
 import tensorflow as tf
 import torchio as tio
 from keras.utils import Sequence
+from keras.callbacks import Callback
 
 class ImageReader():
     '''
@@ -259,10 +260,9 @@ class DataLoader(Sequence):
 
         return self.clean_img_paths, self.artefacts_img_paths, self.batches, self.labels
 
+class FullLossHistory(Callback):
+    def on_train_begin(self, logs):
+        self.per_batch_losses = []
 
-# TODO:
-# tinker with the model and input shapes - consider what's best for arbitrary datasets
-# implement proper training loop
-#      * train first on small batches with 50/50
-#      * gradually increase batch size and clean ratio
-# evaluate 
+    def on_batch_end(self, batch, logs):
+        self.per_batch_losses.append(logs.get("loss"))
