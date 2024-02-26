@@ -2,10 +2,10 @@ import os
 import matplotlib.pyplot as plt
 import tensorflow as tf
 from tensorflow.keras.metrics import AUC
-from tensorflow.keras.callbacks import ModelCheckpoint, ReduceLROnPlateau
+from tensorflow.keras.callbacks import ModelCheckpoint, ReduceLROnPlateau, EarlyStopping
 from sklearn.model_selection import train_test_split
 
-from train_utils import DataCrawler, DataLoader, FullLossHistory
+from train_utils import DataCrawler, DataLoader
 from model import getConvNet
 
 # Check for GPU availability and set TensorFlow to use GPU if available
@@ -37,30 +37,37 @@ ARTEFACT_DISTRO = {
 }
 
 if __name__ == '__main__':
+   
     # get the paths and labels of the real images
     real_image_paths, real_labels = DataCrawler(DATADIR, DATASETS, CONTRASTS, QUALS).crawl()
 
     # train-val-test split (stratified to preserve class prevalence)
     Xtrv, Xtest, ytrv, ytest = train_test_split(real_image_paths, real_labels, test_size=0.3, stratify=real_labels)
     Xtrain, Xval, ytrain, yval = train_test_split(Xtrv, ytrv, test_size=0.3, stratify=ytrv)
+
+    print('train artefact percentage: ', sum(ytrain)/len(ytrain))
+    print('val artefact percentage: ', sum(yval)/len(yval))
+    print('test artefact percentage: ', sum(ytest)/len(ytest))
+
     # write out real-image-paths in test set and labels to file for full evaluation later
     with open('test_split_gt.tsv', 'w') as f:
         for i, path in enumerate(Xtest):
             f.write(path + '\t' + str(ytest[i]) + '\n')
 
     # instantiate DataLoaders
-    trainloader = DataLoader(Xtrain, ytrain, 
-                            target_clean_ratio=0.5, artef_distro=ARTEFACT_DISTRO, batch_size=10)
-    valloader = DataLoader(Xval, yval,
-                            target_clean_ratio=0.5, artef_distro=ARTEFACT_DISTRO, batch_size=10)
-    testloader = DataLoader(Xtest, ytest,
-                            target_clean_ratio=0.5, artef_distro=ARTEFACT_DISTRO, batch_size=10)
+    trainloader = DataLoader(Xtrain, ytrain, train_mode=True,
+                            target_clean_ratio=0.5, artef_distro=ARTEFACT_DISTRO, batch_size=4)
+    valloader = DataLoader(Xval, yval, train_mode=False,
+                            target_clean_ratio=0.5, artef_distro=ARTEFACT_DISTRO, batch_size=4)
+    testloader = DataLoader(Xtest, ytest, train_mode=False,
+                            target_clean_ratio=0.5, artef_distro=ARTEFACT_DISTRO, batch_size=4)
 
     # compile model
     model = getConvNet(out_classes=2, input_shape=(256,256,64,1))
     model.compile(loss='categorical_crossentropy',
                   optimizer='nadam', 
                   metrics=['accuracy', AUC(curve='ROC'), AUC(curve='PR')])
+    
     print(model.summary())
 
     # prepare for training
@@ -70,29 +77,25 @@ if __name__ == '__main__':
         os.makedirs(checkpoint_dir)
 
     # define callbacks
-    full_loss_history = FullLossHistory()
     callbacks = [
         # save model after each epoch
-        ModelCheckpoint(filepath=checkpoint_dir + "/epoch_{epoch}.keras"), 
-        # save model after 100 images, if train AUPRC improves   
-        ModelCheckpoint(filepath=checkpoint_dir + "/batch_{auc_1}.keras",          
-                        save_best_only=True, monitor='auc_1', save_freq=100),
-        # save training loss for each batch
-        full_loss_history,
-        # adaptive learning rate at end of epoch (monitoring val_loss)
-        ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=2, mode='auto',
-                          min_delta=0.0001, cooldown=0, min_lr=0.0001)
+        ModelCheckpoint(filepath=checkpoint_dir + "/end_of_epoch_{epoch}.keras"), 
+        # reduce learning rate if val_loss doesn't improve for 2 epochs
+        ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=3, mode='auto',
+                          min_delta=1e-2, cooldown=0, min_lr=0.0001),
+        # stop training if val_loss doesn't improve for 5 epochs
+        EarlyStopping(monitor="val_loss", min_delta=1e-2, patience=5, verbose=1)
     ]
 
     # train model
-    # TODO: something is wrong with the validation data, probably incorrect usage, it shouldn't be exactly 0.5
     history = model.fit(trainloader, 
                         validation_data=valloader,
-                        epochs=3,
+                        steps_per_epoch=26,        # 26 batches per epoch
+                        epochs=24,                 # 24 epochs = 624 gradient updates
                         callbacks=callbacks,
                         use_multiprocessing=True,
                         workers=2)
-    training_losses = full_loss_history.per_batch_losses
+    training_losses = history.history['loss']
     validation_losses = history.history['val_loss']
 
     # write out train and validation losses
@@ -103,9 +106,12 @@ if __name__ == '__main__':
         for i, loss in enumerate(validation_losses):
             f.write(str(i) + '\t' + str(loss) + '\n')
     # plot train losses
-    plt.plot(training_losses)
-    plt.xlabel('Batch')
-    plt.ylabel('Training Loss')
+    plt.plot(training_losses, label='Training Loss')
+    plt.plot(validation_losses, label='Validation Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.title('Training and Validation Losses')
+    plt.legend()
     plt.savefig('training_losses.png')
 
     # evaluate model
@@ -117,14 +123,14 @@ if __name__ == '__main__':
     
 
 # TODO:
-# define distribution over artefact types
-# split train-val-test by patient, not by image!
 
-# check implementation with small toy model that is quick to train
+# splitting by patient
+# input size - rasampling or sub-volume sampling or registration
+# make sure you save everything during training (straight to GDrive)
+# tack on probabilsitic inference run on test at end of training
+# evaluate probabilistic inference
+# gradually shift training distribution to real distribution
+# get set up on arc
 
-# tinker with the model and input shapes - consider what's best for arbitrary datasets
-# modidy image reader to coerce the input shape a different way
-
-# train faster on GPU
-# implement proper training loop
-#      * train first on small batches with 50/50, then gradually increase batch size and clean ratio
+# define artefact distribution
+# code wrap-around and affine transformation for field gradient ingomoegenity

@@ -129,24 +129,26 @@ class DataLoader(Sequence):
     Pre-defines augmentations to be performed in order to reach a target clean-ratio.
     """
 
-    def __init__(self, Xpaths, y_true, target_clean_ratio, artef_distro, batch_size):
+    def __init__(self, Xpaths, y_true, batch_size, target_clean_ratio, artef_distro, train_mode=True):
         self._check_inputs(Xpaths, y_true, artef_distro, target_clean_ratio)
 
-        self.batch_size = batch_size; 
-        self.target_clean_ratio = target_clean_ratio
-        self.target_artef_distro = artef_distro
+        self.batch_size = batch_size
         self.num_classes = len(np.unique(y_true))
-
-        clean_idx, artefact_idx = np.where(y_true == 1)[0], np.where(y_true == 0)[0]
+        self.reader = ImageReader(input_size=(256,256,64))
+        
         # paths to just the *real* images
+        clean_idx, artefact_idx = np.where(y_true == 1)[0], np.where(y_true == 0)[0]
         self.Clean_img_paths = [Xpaths[i] for i in clean_idx]
         self.Artefacts_img_paths = [Xpaths[i] for i in artefact_idx]
         self.clean_ratio = self._get_clean_ratio()
 
+        self.train_mode = train_mode
+        if self.train_mode:
+            self.target_clean_ratio = target_clean_ratio
+            self.target_artef_distro = artef_distro
+
         # paths to all images, including synthetic ones; split into batches
         self.clean_img_paths, self.artefacts_img_paths, self.batches, self.labels = self.on_epoch_end()
-
-        self.reader = ImageReader(input_size=(256,256,64))
 
     def _check_inputs(self, Xpaths, y_true, artef_distro, target_clean_ratio):
         assert(len(Xpaths) == len(y_true))
@@ -216,7 +218,9 @@ class DataLoader(Sequence):
         """
 
         # 1 - Decide on number of clean and artefact images in each batch with the repartition we target
-        num_clean = int(self.batch_size * self.target_clean_ratio)
+        clean_ratio = self.target_clean_ratio if self.train_mode else self.clean_ratio
+        num_clean = int(self.batch_size * clean_ratio)
+
         num_artefacts = self.batch_size - num_clean
 
         # 2 - Randomly assign the paths to the batches along with their labels
@@ -253,14 +257,19 @@ class DataLoader(Sequence):
     
     def on_epoch_end(self):
         # re-define augmentations to do for next epoch
-        # get paths to all images, including synthetic ones
-        self.clean_img_paths, self.artefacts_img_paths = self._define_augmentations()
+        # get paths to all images, including synthetic ones, if requested
+        if self.train_mode:
+            self.clean_img_paths, self.artefacts_img_paths = self._define_augmentations()
+        else:
+            self.clean_img_paths, self.artefacts_img_paths = self.Clean_img_paths, self.Artefacts_img_paths
         # split these new image paths into new random batches
         self.batches, self.labels = self._def_batches(self.clean_img_paths, self.artefacts_img_paths)
 
         return self.clean_img_paths, self.artefacts_img_paths, self.batches, self.labels
 
 class FullLossHistory(Callback):
+    '''do not use! logs cumulative average of epoch'''
+
     def on_train_begin(self, logs):
         self.per_batch_losses = []
 

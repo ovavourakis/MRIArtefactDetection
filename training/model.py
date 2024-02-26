@@ -61,7 +61,7 @@ def getConvNet(out_classes=2,input_shape=(256,256,64,1)):
     x = MaxPooling3D(pool_size=(2, 2, 2))(x)
 
     # 8 x 8 x 2 x 128
-    # x = Dropout(0.25)(x) # x = Dropout(0.25)(x,training=True)
+    # x = Dropout(0.25)(x,training=True) # = always apply dropout (permanent 'training mode')
     x = Flatten()(x)
     
     # 16384 x 1
@@ -70,7 +70,7 @@ def getConvNet(out_classes=2,input_shape=(256,256,64,1)):
     x = Activation('relu')(x)
 
     # 128 x 1
-    x = Dropout(0.5)(x) # x = Dropout(0.5)(x, training=True)
+    x = Dropout(0.5)(x, training=True) # = always apply dropout (permanent 'training mode')
     out = Dense(out_classes, name='dense_post', activation='softmax')(x)
 
     model = Model(inputs=inp, outputs=out)
