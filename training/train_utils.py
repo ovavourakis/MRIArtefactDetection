@@ -15,7 +15,7 @@ class ImageReader():
     def __init__(self, input_size=(256,256,64)):
         self.input_size = input_size
         self.Synths = {
-            "RandomAffine": tio.RandomAffine(scales=(1.5, 1.5)),        # zooming in the images 
+            "RandomZoom": tio.RandomAffine(scales=(1.5, 1.5)),          # zooming in the images 
             "RandomElasticDeformation": tio.RandomElasticDeformation(), # elastic deformation of the images, 
             "RandomAnisotropy": tio.RandomAnisotropy(),                 # anisotropic deformation of the images
             "RescaleIntensity": tio.RescaleIntensity((0.5, 1.5)),       # rescaling the intensity of the images
@@ -36,7 +36,7 @@ class ImageReader():
 
     def _apply_modifications(self, img_path):
         # 1 - Checking the extension on the img_path + storing it as extension_name (i.e the modification to apply)
-        extensions = ["CAug", "RandomAffine", 'RandomElasticDeformation' 
+        extensions = ["CAug", "RandomZoom", 'RandomElasticDeformation' 
           'RandomAnisotropy', 'RescaleIntensity', 'RandomMotion', 'RandomGhosting', 'RandomSpike', 
           'RandomBiasField', 'RandomBlur', 'RandomNoise','RandomSwap', 'RandomGamma']
         extension_name = None 
@@ -62,7 +62,7 @@ class ImageReader():
             rotating = tio.RandomAffine(degrees=(10)) # If only one value: U(-x, x) 
             modification = tio.Compose([flipping, scaling, shifting, rotating])
 
-        elif extension_name in ["RandomAffine", 'RandomElasticDeformation' 'RandomAnisotropy', 'RescaleIntensity', 
+        elif extension_name in ["RandomZoom", 'RandomElasticDeformation' 'RandomAnisotropy', 'RescaleIntensity', 
                                 'RandomMotion', 'RandomGhosting', 'RandomSpike', 'RandomBiasField', 'RandomBlur', 
                                 'RandomNoise','RandomSwap', 'RandomGamma']:
             modification = self.Synths[extension_name]
@@ -158,7 +158,7 @@ class DataLoader(Sequence):
         assert(sum(artef_distro.values()) == 1)
         for k, v in artef_distro.items():
             assert(v >= 0)
-            assert(k in ['RandomAffine', 'RandomElasticDeformation', 'RandomAnisotropy', 'Intensity', 
+            assert(k in ['RandomZoom', 'RandomElasticDeformation', 'RandomAnisotropy', 'Intensity', 
                          'RandomMotion', 'RandomGhosting', 'RandomSpike', 'RandomBiasField', 'RandomBlur', 
                          'RandomNoise', 'RandomSwap', 'RandomGamma'])
 
