@@ -24,19 +24,20 @@ DATASETS = ['artefacts'+str(i) for i in [1,2,3]]
 CONTRASTS = ['T1wMPR'] #, 'T1wTIR', 'T2w', 'T2starw', 'FLAIR']
 QUALS = ['clean', 'exp_artefacts']
 
-ARTEFACT_DISTRO = {
-    'RandomAffine' : 1/12, 
-    'RandomElasticDeformation' : 1/12, 
-    'RandomAnisotropy' : 1/12, 
-    'Intensity' : 1/12, 
-    'RandomMotion' : 1/12, 
-    'RandomGhosting' : 1/12, 
-    'RandomSpike' : 1/12, 
-    'RandomBiasField' : 1/12, 
-    'RandomBlur' : 1/12, 
-    'RandomNoise' : 1/12, 
-    'RandomSwap' : 1/12, 
-    'RandomGamma' : 1/12
+ARTEFACT_DISTRO = { # TODO
+    'RandomZoom' : 1/15,
+    #'RandomElasticDeformation' : ,     # not defined
+    'RandomAnisotropy' : 1/15, 
+    'Intensity' : 1/15, 
+    'RandomMotion' : 2/15,              # more common
+    'RandomGhosting' : 2/15,            # more common
+    'RandomSpike' : 1/15,  
+    'RandomBiasField' : 2/15,           # more common
+    'RandomBlur' : 1/15, 
+    #'RandomNoise' : ,                  # not defined
+    'RandomSwap' : 1/15, 
+    'RandomGamma' : 1/15,
+    'RandomWrapAround' : 2/15,          # more common
 }
 
 MC_RUNS = 20  # number of Monte Carlo runs on test set

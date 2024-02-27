@@ -98,11 +98,11 @@ def main(image_paths, csv_filepath=None, mc_runs=10, max_items=10, verbose=False
             y = sess.run(None, {input_name: X})[0][0][1] # artefact-prob as float
             predictions_for_img.append(y)
 
-        csv_output.append( str([image_path]+predictions_for_img).strip('[]') )
+        csv_output.append( str([image_path]+predictions_for_img).strip('[]'))
         print(csv_output[-1])
 
     if csv_filepath:
-        with open(csv_filepath, "w") as fd:
+        with open(csv_filepath, "a") as fd:
             fd.write(os.linesep.join(csv_output) + os.linesep)
         print("wrote results to {}".format(csv_filepath))
 

@@ -16,18 +16,19 @@ class ImageReader():
     def __init__(self, input_size=(256,256,64)):
         self.input_size = input_size
         self.Synths = {
-            "RandomAffine": tio.RandomAffine(scales=(1.5, 1.5)),        # zooming in the images 
-            "RandomElasticDeformation": tio.RandomElasticDeformation(), # elastic deformation of the images, 
+            "RandomZoom": tio.RandomAffine(scales=(1.5, 1.5)),          # zooming in the images 
+            # "RandomElasticDeformation": tio.RandomElasticDeformation(), # INCORRECT: parameters unchosen; elastic deformation of the images 
             "RandomAnisotropy": tio.RandomAnisotropy(),                 # anisotropic deformation of the images
             "RescaleIntensity": tio.RescaleIntensity((0.5, 1.5)),       # rescaling the intensity of the images
-            "RandomMotion": tio.RandomMotion(),                         # filling the  𝑘 -space with random rigidly-transformed versions of the original images
+            "RandomMotion": tio.RandomMotion(degrees = (10,15), translation = (10,15)), # filling the  𝑘 -space with random rigidly-transformed versions of the original images
             "RandomGhosting": tio.RandomGhosting(),                     # removing every  𝑛 th plane from the k-space
             "RandomSpike": tio.RandomSpike(),                           # signal peak in  𝑘 -space,
-            "RandomBiasField": tio.RandomBiasField(),                   # Magnetic field inhomogeneities in the MRI scanner produce low-frequency intensity distortions in the images
-            "RandomBlur": tio.RandomBlur(),                             # blurring the images
-            "RandomNoise": tio.RandomNoise(),                           # adding noise to the images
+            "RandomBiasField": tio.RandomBiasField(coefficients = (0.3,0.6)), # Magnetic field inhomogeneities in the MRI scanner produce low-frequency intensity distortions in the images
+            "RandomBlur": tio.RandomBlur(std = (0.6,1.1)),              # blurring the images
+            # "RandomNoise": tio.RandomNoise(),                         # INCORRECT: does not work (why ?); adding noise to the images
             "RandomSwap": tio.RandomSwap(),                             # swapping the phase and magnitude of the images
-            "RandomGamma": tio.RandomGamma()                            # intensity of the images
+            "RandomGamma": tio.RandomGamma(log_gamma = (0.25,0.35)),    # intensity of the images
+            "RandomWrapAround" : self.RandomWrapAround                     # wrapping around the images: Aliasing Artifact
         }
         # pre-processing
         self.orient = tio.transforms.ToCanonical()                  # RAS+ orientation
@@ -35,11 +36,28 @@ class ImageReader():
         self.crop_pad = tio.transforms.CropOrPad(self.input_size)   # TODO: consider re-sampling instead, or in addition
         self.preprocess = tio.Compose([self.orient, self.normalise, self.crop_pad])
 
+    def RandomWrapAround(self, subject):
+        """ Wrapping around the images: Aliasing Artifact """
+        modified = subject
+        dim_value = np.random.choice([0, 1, 2]) # Pick the dimension to wrap on
+        side = np.random.choice([0, 1]) # Pick the side we want to add the wrap-around
+        nb_rows = random.randint(subject.shape[dim_value+1]//4, subject.shape[dim_value+1]//3) 
+        if side == 0: # wrap the last rows to the firsts rows
+                if dim_value == 0: modified.data[:, :nb_rows, :, :] += subject.data[:,-nb_rows:, :, :] 
+                elif dim_value == 1: modified.data[:, :, :nb_rows, :] += subject.data[:, :,-nb_rows:, :] 
+                elif dim_value == 2: modified.data[:, :, :, :nb_rows] += subject.data[:, :, :,-nb_rows:]
+        elif side == 1: # wrap the firsts rows to the last rows
+                if dim_value == 0: modified.data[:,-nb_rows:, :, :] += subject.data[:, :nb_rows, :, :] 
+                elif dim_value == 1: modified.data[:, :,-nb_rows:, :] += subject.data[:, :, :nb_rows, :] 
+                elif dim_value == 2: modified.data[:, :, :, -nb_rows:] += subject.data[:, :, :, :nb_rows]
+        return modified
+ 
+
     def _apply_modifications(self, img_path):
         # 1 - Checking the extension on the img_path + storing it as extension_name (i.e the modification to apply)
-        extensions = ["CAug", "RandomAffine", 'RandomElasticDeformation' 
+        extensions = ["CAug", "RandomZoom", 
           'RandomAnisotropy', 'RescaleIntensity', 'RandomMotion', 'RandomGhosting', 'RandomSpike', 
-          'RandomBiasField', 'RandomBlur', 'RandomNoise','RandomSwap', 'RandomGamma']
+          'RandomBiasField', 'RandomBlur', 'RandomSwap', 'RandomGamma', 'RandomWrapAround']
         extension_name = None 
         for extension in extensions:
             if extension in img_path:
@@ -63,9 +81,11 @@ class ImageReader():
             rotating = tio.RandomAffine(degrees=(10)) # If only one value: U(-x, x) 
             modification = tio.Compose([flipping, scaling, shifting, rotating])
 
-        elif extension_name in ["RandomAffine", 'RandomElasticDeformation' 'RandomAnisotropy', 'RescaleIntensity', 
-                                'RandomMotion', 'RandomGhosting', 'RandomSpike', 'RandomBiasField', 'RandomBlur', 
-                                'RandomNoise','RandomSwap', 'RandomGamma']:
+        elif extension_name in ["RandomZoom", 
+                                'RandomAnisotropy', 'RescaleIntensity', 
+                                'RandomMotion', 'RandomGhosting', 'RandomSpike', 
+                                'RandomBiasField', 'RandomBlur', 
+                                'RandomSwap', 'RandomGamma', 'RandomWrapAround']:
             modification = self.Synths[extension_name]
         
         else:
@@ -165,9 +185,10 @@ class DataLoader(Sequence):
             assert(sum(artef_distro.values()) == 1)
             for k, v in artef_distro.items():
                 assert(v >= 0)
-                assert(k in ['RandomAffine', 'RandomElasticDeformation', 'RandomAnisotropy', 'Intensity', 
-                            'RandomMotion', 'RandomGhosting', 'RandomSpike', 'RandomBiasField', 'RandomBlur', 
-                            'RandomNoise', 'RandomSwap', 'RandomGamma'])
+                assert(k in ['RandomZoom', 
+                            'RandomAnisotropy', 'Intensity', 'RandomMotion', 'RandomGhosting', 
+                            'RandomSpike', 'RandomBiasField', 'RandomBlur', 
+                            'RandomSwap', 'RandomGamma', 'RandomWrapAround'])
 
     def _get_clean_ratio(self):
         # calculate fraction of clean images (among non-synthetic data)
