@@ -24,7 +24,7 @@ DATASETS = ['artefacts'+str(i) for i in [1,2,3]]
 CONTRASTS = ['T1wMPR'] #, 'T1wTIR', 'T2w', 'T2starw', 'FLAIR']
 QUALS = ['clean', 'exp_artefacts']
 
-ARTEFACT_DISTRO = { # TODO
+ARTEFACT_DISTRO = {
     'RandomZoom' : 1/15,
     #'RandomElasticDeformation' : ,     # not defined
     'RandomAnisotropy' : 1/15, 
@@ -135,8 +135,6 @@ if __name__ == '__main__':
     
 
 # TODO:
-
-# fix the distribution checker / exclude excluded functions
 
 # run once on Colab
 # evaluate probabilistic inference
