@@ -182,7 +182,7 @@ class DataLoader(Sequence):
             assert(target_clean_ratio >= 0 and target_clean_ratio <= 1)
             # artef_distro defines a categorical probability distribution over (synthetic) artefact types
             assert(isinstance(artef_distro, dict))
-            assert(sum(artef_distro.values()) == 1)
+            assert(np.allclose(sum(artef_distro.values()), 1))
             for k, v in artef_distro.items():
                 assert(v >= 0)
                 assert(k in ['RandomZoom', 
@@ -236,7 +236,7 @@ class DataLoader(Sequence):
         return clean_img_paths, artefacts_img_paths
 
     def __len__(self):
-        return math.ceil((len(self.clean_img_paths)+len(self.artefacts_img_paths)) // self.batch_size)
+        return math.ceil((len(self.clean_img_paths)+len(self.artefacts_img_paths)) / self.batch_size)
 
     def _def_batches(self, clean_img_paths, artefacts_img_paths):
         """ Determine batches at start of each epoch:
