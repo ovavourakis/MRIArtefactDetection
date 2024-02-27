@@ -1,21 +1,24 @@
 import os
+import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import tensorflow as tf
 from tensorflow.keras.metrics import AUC
 from tensorflow.keras.callbacks import ModelCheckpoint, ReduceLROnPlateau, EarlyStopping
 from sklearn.model_selection import train_test_split
 
-from train_utils import DataCrawler, DataLoader
+from train_utils import DataCrawler, DataLoader, plot_train_metrics
 from model import getConvNet
 
 # Check for GPU availability and set TensorFlow to use GPU if available
 physical_devices = tf.config.list_physical_devices('GPU')
 if len(physical_devices) > 0:
     tf.config.experimental.set_memory_growth(physical_devices[0], True)
-    print("Using GPU")
+    print("Using GPU\n")
 else:
-    print("Using CPU")
+    print("Using CPU\n")
 
+SAVEDIR = './trainrun/'
 DATADIR = '/Users/odysseasvavourakis/Documents/2023-2024/Studium/SABS/GE Project/data.nosync/struc_data'
 DATASETS = ['artefacts'+str(i) for i in [1,2,3]]
 CONTRASTS = ['T1wMPR'] #, 'T1wTIR', 'T2w', 'T2starw', 'FLAIR']
@@ -36,45 +39,45 @@ ARTEFACT_DISTRO = {
     'RandomGamma' : 1/12
 }
 
+MC_RUNS = 20  # number of Monte Carlo runs on test set
+
 if __name__ == '__main__':
-   
+    
+    os.makedirs(SAVEDIR, exist_ok=True)
+
     # get the paths and labels of the real images
     real_image_paths, real_labels = DataCrawler(DATADIR, DATASETS, CONTRASTS, QUALS).crawl()
 
     # train-val-test split (stratified to preserve class prevalence)
-    Xtrv, Xtest, ytrv, ytest = train_test_split(real_image_paths, real_labels, test_size=0.3, stratify=real_labels)
-    Xtrain, Xval, ytrain, yval = train_test_split(Xtrv, ytrv, test_size=0.3, stratify=ytrv)
+    Xtrv, Xtest, ytrv, ytest = train_test_split(real_image_paths, real_labels, test_size=0.1, stratify=real_labels)
+    Xtrain, Xval, ytrain, yval = train_test_split(Xtrv, ytrv, test_size=0.2222, stratify=ytrv)
 
-    print('train artefact percentage: ', sum(ytrain)/len(ytrain))
-    print('val artefact percentage: ', sum(yval)/len(yval))
-    print('test artefact percentage: ', sum(ytest)/len(ytest))
-
-    # write out real-image-paths in test set and labels to file for full evaluation later
-    with open('test_split_gt.tsv', 'w') as f:
-        for i, path in enumerate(Xtest):
-            f.write(path + '\t' + str(ytest[i]) + '\n')
+    for string, y in zip(['train', 'val', 'test'], [ytrain, yval, ytest]):
+        print('number in ' + string + ' set:', len(y))
+        print(string + ' class distribution: ', sum(y)/len(y), ' percent artefact')
 
     # instantiate DataLoaders
-    trainloader = DataLoader(Xtrain, ytrain, train_mode=True,
-                            target_clean_ratio=0.5, artef_distro=ARTEFACT_DISTRO, batch_size=4)
-    valloader = DataLoader(Xval, yval, train_mode=False,
-                            target_clean_ratio=0.5, artef_distro=ARTEFACT_DISTRO, batch_size=4)
-    testloader = DataLoader(Xtest, ytest, train_mode=False,
-                            target_clean_ratio=0.5, artef_distro=ARTEFACT_DISTRO, batch_size=4)
+    trainloader = DataLoader(Xtrain, ytrain, train_mode=True, target_clean_ratio=0.5,
+                                artef_distro=ARTEFACT_DISTRO, batch_size=4)
+    valloader = DataLoader(Xval, yval, train_mode=False, batch_size=50)
+    testloader = DataLoader(Xtest*MC_RUNS, np.array(ytest.tolist()*MC_RUNS), 
+                            train_mode=False, batch_size=50)
+    # write out ground truth for test set
+    test_images = [file for sublist in testloader.batches for file in sublist]
+    y_true_test = [y for sublist in testloader.labels for y in sublist]
+    out = pd.DataFrame({'image': test_images, 'bin_gt': y_true_test}).groupby('image').agg({'bin_gt': 'first'})
+    out.to_csv(SAVEDIR+'test_split_gt.tsv', sep='\t')
 
     # compile model
     model = getConvNet(out_classes=2, input_shape=(256,256,64,1))
     model.compile(loss='categorical_crossentropy',
                   optimizer='nadam', 
                   metrics=['accuracy', AUC(curve='ROC'), AUC(curve='PR')])
-    
     print(model.summary())
 
     # prepare for training
-    # make directory to store model checkpoints
-    checkpoint_dir = "./ckpts"
-    if not os.path.exists(checkpoint_dir):
-        os.makedirs(checkpoint_dir)
+    checkpoint_dir = SAVEDIR+"ckpts"
+    os.makedirs(checkpoint_dir, exist_ok=True)
 
     # define callbacks
     callbacks = [
@@ -95,42 +98,51 @@ if __name__ == '__main__':
                         callbacks=callbacks,
                         use_multiprocessing=True,
                         workers=2)
-    training_losses = history.history['loss']
-    validation_losses = history.history['val_loss']
+    
+    # save metrics
+    pd.DataFrame({
+        'train_loss': history.history['loss'],
+        'val_loss': history.history['val_loss'],
+        'train_accuracy': history.history['accuracy'],
+        'val_accuracy': history.history['val_accuracy'],
+        'train_auc': history.history['auc'],
+        'val_auc': history.history['val_auc'],
+        'train_ap': history.history['auc_1'],
+        'val_ap': history.history['val_auc_1']
+    }).to_csv(SAVEDIR+'training_metrics.tsv', sep='\t')
+    plot_train_metrics(history, SAVEDIR+'train_metrics_plot.png')
 
-    # write out train and validation losses
-    with open('train_losses.tsv', 'w') as f:
-        for i, loss in enumerate(training_losses):
-            f.write(str(i) + '\t' + str(loss) + '\n')
-    with open('val_losses.tsv', 'w') as f:
-        for i, loss in enumerate(validation_losses):
-            f.write(str(i) + '\t' + str(loss) + '\n')
-    # plot train losses
-    plt.plot(training_losses, label='Training Loss')
-    plt.plot(validation_losses, label='Validation Loss')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.title('Training and Validation Losses')
-    plt.legend()
-    plt.savefig('training_losses.png')
-
-    # evaluate model
+    # evaluate model (20 MC runs per test image)
     print("#"*30)
     print("Evaluate on Test Set")
     print("#"*30)
-    result = model.evaluate(testloader)
-    dict(zip(model.metrics_names, result))
+    # predict on test set, and write out results
+    y_pred = model.predict(testloader, use_multiprocessing=True)
+    df = pd.DataFrame({'image': test_images, 'bin_gt': y_true_test, 'y_pred': y_pred})
+    df = df.groupby('image').agg({'bin_gt': 'first', 'y_pred': list})
+    df[[f'y_pred{i}' for i in range(MC_RUNS)]] = pd.DataFrame(df['y_pred'].tolist(), index=df.index)
+    df = df.drop(columns='y_pred')
+    df.to_csv(SAVEDIR+'raw_preds_test.tsv', sep='\t')
+
+    # calculate AUROC, AP on each MC run individually
+    aurocs, aps = [], []
+    for i in range(MC_RUNS):
+        aurocs.append(AUC(curve='ROC')(df['bin_gt'], df[f'y_pred{i}']))
+        aps.append(AUC(curve='PR')(df['bin_gt'], df[f'y_pred{i}']))
+    print('mean AUROC on test:', np.mean(aurocs))
+    print('mean AP on test:', np.mean(aps))
     
 
 # TODO:
 
-# splitting by patient
-# input size - rasampling or sub-volume sampling or registration
-# make sure you save everything during training (straight to GDrive)
-# tack on probabilsitic inference run on test at end of training
+# fix the distribution checker / exclude excluded functions
+
+# run once on Colab
 # evaluate probabilistic inference
+# script to load arbitrary checkpoints and run inference on some provided test set for GE
+
+# splitting by patient
+# input size - resampling or sub-volume sampling or registration
+
 # gradually shift training distribution to real distribution
 # get set up on arc
-
-# define artefact distribution
-# code wrap-around and affine transformation for field gradient ingomoegenity

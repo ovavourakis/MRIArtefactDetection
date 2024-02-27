@@ -4,6 +4,7 @@ import tensorflow as tf
 import torchio as tio
 from keras.utils import Sequence
 from keras.callbacks import Callback
+import matplotlib.pyplot as plt
 
 class ImageReader():
     '''
@@ -67,6 +68,9 @@ class ImageReader():
                                 'RandomNoise','RandomSwap', 'RandomGamma']:
             modification = self.Synths[extension_name]
         
+        else:
+            raise ValueError(f"Path extension (augmentation) {extension_name} not recognised")
+        
          # 4 - Apply the modification on the modified image and return modified version
         modified_img = modification(img)   
         # modified_img.save(img_path)
@@ -129,8 +133,9 @@ class DataLoader(Sequence):
     Pre-defines augmentations to be performed in order to reach a target clean-ratio.
     """
 
-    def __init__(self, Xpaths, y_true, batch_size, target_clean_ratio, artef_distro, train_mode=True):
-        self._check_inputs(Xpaths, y_true, artef_distro, target_clean_ratio)
+    def __init__(self, Xpaths, y_true, batch_size, 
+                  train_mode=True, target_clean_ratio=None, artef_distro=None):
+        self._check_inputs(Xpaths, y_true, artef_distro, target_clean_ratio, train_mode)
 
         self.batch_size = batch_size
         self.num_classes = len(np.unique(y_true))
@@ -150,17 +155,19 @@ class DataLoader(Sequence):
         # paths to all images, including synthetic ones; split into batches
         self.clean_img_paths, self.artefacts_img_paths, self.batches, self.labels = self.on_epoch_end()
 
-    def _check_inputs(self, Xpaths, y_true, artef_distro, target_clean_ratio):
+    def _check_inputs(self, Xpaths, y_true, artef_distro, target_clean_ratio, train_mode):
         assert(len(Xpaths) == len(y_true))
-        assert(target_clean_ratio >= 0 and target_clean_ratio <= 1)
-        # artef_distro defines a categorical probability distribution over (synthetic) artefact types
-        assert(isinstance(artef_distro, dict))
-        assert(sum(artef_distro.values()) == 1)
-        for k, v in artef_distro.items():
-            assert(v >= 0)
-            assert(k in ['RandomAffine', 'RandomElasticDeformation', 'RandomAnisotropy', 'Intensity', 
-                         'RandomMotion', 'RandomGhosting', 'RandomSpike', 'RandomBiasField', 'RandomBlur', 
-                         'RandomNoise', 'RandomSwap', 'RandomGamma'])
+        assert(len(np.unique(y_true)) == 2)
+        if train_mode:
+            assert(target_clean_ratio >= 0 and target_clean_ratio <= 1)
+            # artef_distro defines a categorical probability distribution over (synthetic) artefact types
+            assert(isinstance(artef_distro, dict))
+            assert(sum(artef_distro.values()) == 1)
+            for k, v in artef_distro.items():
+                assert(v >= 0)
+                assert(k in ['RandomAffine', 'RandomElasticDeformation', 'RandomAnisotropy', 'Intensity', 
+                            'RandomMotion', 'RandomGhosting', 'RandomSpike', 'RandomBiasField', 'RandomBlur', 
+                            'RandomNoise', 'RandomSwap', 'RandomGamma'])
 
     def _get_clean_ratio(self):
         # calculate fraction of clean images (among non-synthetic data)
@@ -216,30 +223,39 @@ class DataLoader(Sequence):
         Makes sure target clean-ratio is maintained in each batch
         Makes sure all the existing images are used in the epoch
         """
+        
+        if self.train_mode: 
+            # 1 - Decide on number of clean and artefact images in each batch with the repartition we target
+            num_clean = int(self.batch_size * self.target_clean_ratio )
+            num_artefacts = self.batch_size - num_clean
 
-        # 1 - Decide on number of clean and artefact images in each batch with the repartition we target
-        clean_ratio = self.target_clean_ratio if self.train_mode else self.clean_ratio
-        num_clean = int(self.batch_size * clean_ratio)
+            # 2 - Randomly assign the paths to the batches along with their labels
+            nb_batches = len(clean_img_paths + artefacts_img_paths) // self.batch_size
+            random.shuffle(self.clean_img_paths)
+            random.shuffle(self.artefacts_img_paths)
+            batches = [
+                self.clean_img_paths[i * num_clean:(i + 1) * num_clean] + self.artefacts_img_paths[i * num_artefacts:(i + 1) * num_artefacts]
+                for i in range(nb_batches)
+                ]
+            labels = [[1]*num_clean + [0]*num_artefacts for _ in range(nb_batches)]
 
-        num_artefacts = self.batch_size - num_clean
-
-        # 2 - Randomly assign the paths to the batches along with their labels
-        nb_batches = len(clean_img_paths + artefacts_img_paths) // self.batch_size
-        random.shuffle(self.clean_img_paths)
-        random.shuffle(self.artefacts_img_paths)
-        batches = [
-            self.clean_img_paths[i * num_clean:(i + 1) * num_clean] + self.artefacts_img_paths[i * num_artefacts:(i + 1) * num_artefacts]
-            for i in range(nb_batches)
-            ]
-        labels = [[1]*num_clean + [0]*num_artefacts for _ in range(nb_batches)]
-
-        # 3 - Shuffle batch in batches ALONG with their labels
-        for i in range(nb_batches):
-            zipped = list(zip(batches[i], labels[i]))
-            random.shuffle(zipped)
-            batches[i], labels[i] = zip(*zipped)
-            batches[i] = list(batches[i])
-            labels[i] = list(labels[i])
+            # 3 - Shuffle batch in batches ALONG with their labels
+            for i in range(nb_batches):
+                zipped = list(zip(batches[i], labels[i]))
+                random.shuffle(zipped)
+                batches[i], labels[i] = zip(*zipped)
+                batches[i] = list(batches[i])
+                labels[i] = list(labels[i])
+        else:
+            # in this case we don't care about the fraction of cleans in each batch, just chunk the data
+            files = clean_img_paths + artefacts_img_paths
+            flat_labels = [0]*len(clean_img_paths) + [1]*len(artefacts_img_paths)
+            
+            batches, labels = [], []
+            while len(files) > 0:
+                end_index = min(self.batch_size, len(files))
+                batches.append(files[:end_index]); labels.append(flat_labels[:end_index])
+                files = files[self.batch_size:]; flat_labels = flat_labels[self.batch_size:]
 
         return batches, labels
 
@@ -256,22 +272,55 @@ class DataLoader(Sequence):
         return X, y_one_hot
     
     def on_epoch_end(self):
-        # re-define augmentations to do for next epoch
-        # get paths to all images, including synthetic ones, if requested
+         # get paths to all images, including synthetic ones, if requested
         if self.train_mode:
+            # re-define augmentations to do for next epoch
             self.clean_img_paths, self.artefacts_img_paths = self._define_augmentations()
         else:
             self.clean_img_paths, self.artefacts_img_paths = self.Clean_img_paths, self.Artefacts_img_paths
-        # split these new image paths into new random batches
+        # split these new image paths into batches
         self.batches, self.labels = self._def_batches(self.clean_img_paths, self.artefacts_img_paths)
 
         return self.clean_img_paths, self.artefacts_img_paths, self.batches, self.labels
+    
+def plot_train_metrics(history, filename):
+    '''Plot the training metrics'''
 
-class FullLossHistory(Callback):
-    '''do not use! logs cumulative average of epoch'''
+    # Plotting 4x4 metrics
+    fig, axs = plt.subplots(2, 2, figsize=(15, 10))
+    fig.suptitle('Training and Validation Metrics')
 
-    def on_train_begin(self, logs):
-        self.per_batch_losses = []
+    # Loss subplot
+    axs[0, 0].plot(history.history['loss'], label='Train Loss')
+    axs[0, 0].plot(history.history['val_loss'], label='Validation Loss')
+    axs[0, 0].set_title('Loss')
+    axs[0, 0].set_xlabel('Epoch')
+    axs[0, 0].set_ylabel('Loss')
+    axs[0, 0].legend()
 
-    def on_batch_end(self, batch, logs):
-        self.per_batch_losses.append(logs.get("loss"))
+    # Accuracy subplot
+    axs[0, 1].plot(history.history['accuracy'], label='Train Accuracy')
+    axs[0, 1].plot(history.history['val_accuracy'], label='Validation Accuracy')
+    axs[0, 1].set_title('Accuracy')
+    axs[0, 1].set_xlabel('Epoch')
+    axs[0, 1].set_ylabel('Accuracy')
+    axs[0, 1].legend()
+
+    # AUROC subplot
+    axs[1, 0].plot(history.history['auc'], label='Train AUC')
+    axs[1, 0].plot(history.history['val_auc'], label='Validation AUC')
+    axs[1, 0].set_title('AUC')
+    axs[1, 0].set_xlabel('Epoch')
+    axs[1, 0].set_ylabel('AUC')
+    axs[1, 0].legend()
+
+    # AUPRC subplot
+    axs[1, 1].plot(history.history['auc_1'], label='Train AP')
+    axs[1, 1].plot(history.history['val_auc_1'], label='Validation AP')
+    axs[1, 1].set_title('AP')
+    axs[1, 1].set_xlabel('Epoch')
+    axs[1, 1].set_ylabel('AP')
+    axs[1, 1].legend()
+
+    plt.tight_layout()
+    plt.savefig(filename)
