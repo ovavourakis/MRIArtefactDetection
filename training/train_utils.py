@@ -236,7 +236,7 @@ class DataLoader(Sequence):
         return clean_img_paths, artefacts_img_paths
 
     def __len__(self):
-        return math.ceil((len(self.clean_img_paths)+len(self.artefacts_img_paths)) / self.batch_size)
+        return len(self.batches)
 
     def _def_batches(self, clean_img_paths, artefacts_img_paths):
         """ Determine batches at start of each epoch:
@@ -328,16 +328,16 @@ def plot_train_metrics(history, filename):
     axs[0, 1].legend()
 
     # AUROC subplot
-    axs[1, 0].plot(history.history['auc'], label='Train AUC')
-    axs[1, 0].plot(history.history['val_auc'], label='Validation AUC')
+    axs[1, 0].plot(history.history['auroc'], label='Train AUC')
+    axs[1, 0].plot(history.history['val_auroc'], label='Validation AUC')
     axs[1, 0].set_title('AUC')
     axs[1, 0].set_xlabel('Epoch')
     axs[1, 0].set_ylabel('AUC')
     axs[1, 0].legend()
 
     # AUPRC subplot
-    axs[1, 1].plot(history.history['auc_1'], label='Train AP')
-    axs[1, 1].plot(history.history['val_auc_1'], label='Validation AP')
+    axs[1, 1].plot(history.history['auprc'], label='Train AP')
+    axs[1, 1].plot(history.history['val_auprc'], label='Validation AP')
     axs[1, 1].set_title('AP')
     axs[1, 1].set_xlabel('Epoch')
     axs[1, 1].set_ylabel('AP')

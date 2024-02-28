@@ -18,7 +18,7 @@ if len(physical_devices) > 0:
 else:
     print("Using CPU\n")
 
-SAVEDIR = './trainrun/'
+SAVEDIR = './trainrun/' # make sure this has a trailing slash
 DATADIR = '/Users/odysseasvavourakis/Documents/2023-2024/Studium/SABS/GE Project/data.nosync/struc_data'
 DATASETS = ['artefacts'+str(i) for i in [1,2,3]]
 CONTRASTS = ['T1wMPR'] #, 'T1wTIR', 'T2w', 'T2starw', 'FLAIR']
@@ -63,6 +63,7 @@ if __name__ == '__main__':
     valloader = DataLoader(Xval, yval, train_mode=False, batch_size=50)
     testloader = DataLoader(Xtest*MC_RUNS, np.array(ytest.tolist()*MC_RUNS), 
                             train_mode=False, batch_size=50)
+
     # write out ground truth for test set
     test_images = [file for sublist in testloader.batches for file in sublist]
     y_true_test = [y for sublist in testloader.labels for y in sublist]
@@ -72,8 +73,10 @@ if __name__ == '__main__':
     # compile model
     model = getConvNet(out_classes=2, input_shape=(256,256,64,1))
     model.compile(loss='categorical_crossentropy',
-                  optimizer='nadam', 
-                  metrics=['accuracy', AUC(curve='ROC'), AUC(curve='PR')])
+                optimizer='nadam', 
+                metrics=['accuracy', 
+                        AUC(curve='ROC', name='auroc'), 
+                        AUC(curve='PR', name='auprc')])
     print(model.summary())
 
     # prepare for training
@@ -85,7 +88,7 @@ if __name__ == '__main__':
         # save model after each epoch
         ModelCheckpoint(filepath=checkpoint_dir + "/end_of_epoch_{epoch}.keras"), 
         # reduce learning rate if val_loss doesn't improve for 2 epochs
-        ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=3, mode='auto',
+        ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=2, mode='auto',
                           min_delta=1e-2, cooldown=0, min_lr=0.0001),
         # stop training if val_loss doesn't improve for 5 epochs
         EarlyStopping(monitor="val_loss", min_delta=1e-2, patience=5, verbose=1)
@@ -119,7 +122,7 @@ if __name__ == '__main__':
     print("#"*30)
     # predict on test set, and write out results
     y_pred = model.predict(testloader, use_multiprocessing=True)
-    df = pd.DataFrame({'image': test_images, 'bin_gt': y_true_test, 'y_pred': y_pred})
+    df = pd.DataFrame({'image': test_images, 'bin_gt': y_true_test, 'y_pred': y_pred[:,1]})
     df = df.groupby('image').agg({'bin_gt': 'first', 'y_pred': list})
     df[[f'y_pred{i}' for i in range(MC_RUNS)]] = pd.DataFrame(df['y_pred'].tolist(), index=df.index)
     df = df.drop(columns='y_pred')
@@ -135,13 +138,16 @@ if __name__ == '__main__':
     
 
 # TODO:
+# try training with the old augmentation parameters ! 
+    # that includes the parameters within each augmentation function
+    # + 0.5 inference-time dropout
 
-# run once on Colab
-# evaluate probabilistic inference
-# script to load arbitrary checkpoints and run inference on some provided test set for GE
+# export Colab environment
+# make the new inference script pretty
+    # including the environment, need to have same keras version as we do
 
 # splitting by patient
 # input size - resampling or sub-volume sampling or registration
-
 # gradually shift training distribution to real distribution
 # get set up on arc
+# integrate ADNI data
