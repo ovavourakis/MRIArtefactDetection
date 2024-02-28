@@ -1,10 +1,32 @@
-import os, random, math
+import torch, os, random, math
 import numpy as np
 import tensorflow as tf
 import torchio as tio
 from keras.utils import Sequence
 from keras.callbacks import Callback
 import matplotlib.pyplot as plt
+
+def split_by_patient(real_image_paths, pids, real_labels):
+    ys = [1,0,0]
+    while max(ys)-min(ys)>0.02:
+        for trvidx, testidx in GroupShuffleSplit(n_splits=1, test_size=0.1).split(real_image_paths, real_labels, pids):
+            Xtrval, Xtest = [real_image_paths[i] for i in trvidx], [real_image_paths[i] for i in testidx]
+            ytrval, ytest = [real_labels[i] for i in trvidx], [real_labels[i] for i in testidx]
+            pid_trval, pid_test = [pids[i] for i in trvidx], [pids[i] for i in testidx]
+
+        for tridx, validx in GroupShuffleSplit(n_splits=1, test_size=0.2222).split(Xtrval, ytrval, pid_trval):
+            Xtrain, Xval = [Xtrval[i] for i in tridx], [Xtrval[i] for i in validx]
+            ytrain, yval = [ytrval[i] for i in tridx], [ytrval[i] for i in validx]
+            pid_train, pid_val = [pid_trval[i] for i in tridx], [pid_trval[i] for i in validx]
+
+        # assert there is not overlap between pid_train and pid_test, and pid_val
+        assert len(set(pid_train).intersection(set(pid_test))) == 0
+        assert len(set(pid_val).intersection(set(pid_test))) == 0
+        assert len(set(pid_train).intersection(set(pid_val))) == 0
+        
+        ys = [sum(y)/len(y) for y in [ytrain, yval, ytest]]
+
+    return Xtrain, Xval, Xtest, ytrain, yval, ytest
 
 class ImageReader():
     '''
@@ -140,12 +162,15 @@ class DataCrawler():
                         clean_img_paths.extend(img_paths)
                     else:
                         artefacts_img_paths.extend(img_paths)
+        # parse out the subject IDs from the paths
+        clean_ids = [p.split('sub-')[1].split('_')[0] for p in clean_img_paths]
+        artefacts_ids = [p.split('sub-')[1].split('_')[0] for p in artefacts_img_paths]
         # define the appropriate labels
         num_clean = len(clean_img_paths)
         num_artefacts = len(artefacts_img_paths)
         y_true = np.array([1]*num_clean + [0]*num_artefacts)
 
-        return clean_img_paths + artefacts_img_paths, y_true
+        return clean_img_paths + artefacts_img_paths, clean_ids + artefacts_ids, y_true
 
 class DataLoader(Sequence):
     """
@@ -162,7 +187,7 @@ class DataLoader(Sequence):
         self.reader = ImageReader(input_size=(256,256,64))
         
         # paths to just the *real* images
-        clean_idx, artefact_idx = np.where(y_true == 1)[0], np.where(y_true == 0)[0]
+        clean_idx, artefact_idx = np.where(y_true == 0)[0], np.where(y_true == 1)[0]
         self.Clean_img_paths = [Xpaths[i] for i in clean_idx]
         self.Artefacts_img_paths = [Xpaths[i] for i in artefact_idx]
         self.clean_ratio = self._get_clean_ratio()
@@ -186,7 +211,7 @@ class DataLoader(Sequence):
             for k, v in artef_distro.items():
                 assert(v >= 0)
                 assert(k in ['RandomZoom', 
-                            'RandomAnisotropy', 'Intensity', 'RandomMotion', 'RandomGhosting', 
+                            'RandomAnisotropy', 'RescaleIntensity', 'RandomMotion', 'RandomGhosting', 
                             'RandomSpike', 'RandomBiasField', 'RandomBlur', 
                             'RandomSwap', 'RandomGamma', 'RandomWrapAround'])
 
@@ -207,12 +232,13 @@ class DataLoader(Sequence):
             elif aug_type=='artefact':
                 augs = list(self.target_artef_distro.keys())
                 probs = list(self.target_artef_distro.values())
-                aug = np.random.choice(augs, size = 1, p = probs)
+                aug = np.random.choice(augs, size = 1, p = probs)[0]
             else:
                 raise ValueError('aug_type must be either "clean" or "artefact"')
             dir, file = os.path.split(path)
             fname, ext = file.split('.', 1) # just the first dot, so we don't split extensions like .nii.gz
-            return os.path.join(dir, fname) + aug + '.' + ext
+            print(dir, fname, aug, ext)
+            return os.path.join(dir, fname) + '_' + aug + '.' + ext
         
         clean_ratio, cleans, total = self._get_clean_ratio()
         clean_img_paths = self.Clean_img_paths
@@ -258,7 +284,7 @@ class DataLoader(Sequence):
                 self.clean_img_paths[i * num_clean:(i + 1) * num_clean] + self.artefacts_img_paths[i * num_artefacts:(i + 1) * num_artefacts]
                 for i in range(nb_batches)
                 ]
-            labels = [[1]*num_clean + [0]*num_artefacts for _ in range(nb_batches)]
+            labels = [[0]*num_clean + [1]*num_artefacts for _ in range(nb_batches)]
 
             # 3 - Shuffle batch in batches ALONG with their labels
             for i in range(nb_batches):
@@ -284,7 +310,10 @@ class DataLoader(Sequence):
         '''Generates the batch, with associated labels.'''
         # read in the images, augment with artefacts as neccessary, then apply pre-processing
         batch_images = [self.reader.read_image(path) for path in self.batches[idx]]
-        X = np.stack([np.squeeze(img.data.numpy()) for img in batch_images], axis = 0)
+        # X = np.stack([np.squeeze(img.data.numpy()) for img in batch_images], axis = 0)
+        # X = np.stack([img.data.numpy() for img in batch_images], axis = 0)
+        X = torch.stack([img.data.permute(1, 2, 3, 0) for img in batch_images])
+
         
         # also get appropriate labels
         y_true = self.labels[idx]

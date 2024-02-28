@@ -5,9 +5,9 @@ import matplotlib.pyplot as plt
 import tensorflow as tf
 from tensorflow.keras.metrics import AUC
 from tensorflow.keras.callbacks import ModelCheckpoint, ReduceLROnPlateau, EarlyStopping
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, GroupShuffleSplit
 
-from train_utils import DataCrawler, DataLoader, plot_train_metrics
+from train_utils import DataCrawler, DataLoader, plot_train_metrics, split_by_patient
 from model import getConvNet
 
 # Check for GPU availability and set TensorFlow to use GPU if available
@@ -21,7 +21,7 @@ else:
 SAVEDIR = './trainrun/' # make sure this has a trailing slash
 DATADIR = '/Users/odysseasvavourakis/Documents/2023-2024/Studium/SABS/GE Project/data.nosync/struc_data'
 DATASETS = ['artefacts'+str(i) for i in [1,2,3]]
-CONTRASTS = ['T1wMPR'] #, 'T1wTIR', 'T2w', 'T2starw', 'FLAIR']
+CONTRASTS = ['T1wMPR']#, 'T1wTIR', 'T2w', 'T2starw', 'FLAIR']
 QUALS = ['clean', 'exp_artefacts']
 
 ARTEFACT_DISTRO = {
@@ -47,11 +47,14 @@ if __name__ == '__main__':
     os.makedirs(SAVEDIR, exist_ok=True)
 
     # get the paths and labels of the real images
-    real_image_paths, real_labels = DataCrawler(DATADIR, DATASETS, CONTRASTS, QUALS).crawl()
+    real_image_paths, pids, real_labels = DataCrawler(DATADIR, DATASETS, CONTRASTS, QUALS).crawl()
 
-    # train-val-test split (stratified to preserve class prevalence)
-    Xtrv, Xtest, ytrv, ytest = train_test_split(real_image_paths, real_labels, test_size=0.1, stratify=real_labels)
-    Xtrain, Xval, ytrain, yval = train_test_split(Xtrv, ytrv, test_size=0.2222, stratify=ytrv)
+    # split by patient
+    Xtrain, Xval, Xtest, ytrain, yval, ytest = split_by_patient(real_image_paths, pids, real_labels)
+
+    # # train-val-test split (stratified to preserve class prevalence)
+    # Xtrv, Xtest, ytrv, ytest = train_test_split(real_image_paths, real_labels, test_size=0.1, stratify=real_labels)
+    # Xtrain, Xval, ytrain, yval = train_test_split(Xtrv, ytrv, test_size=0.2222, stratify=ytrv)
 
     for string, y in zip(['train', 'val', 'test'], [ytrain, yval, ytest]):
         print('number in ' + string + ' set:', len(y))
@@ -135,18 +138,22 @@ if __name__ == '__main__':
         aps.append(AUC(curve='PR')(df['bin_gt'], df[f'y_pred{i}']))
     print('mean AUROC on test:', np.mean(aurocs))
     print('mean AP on test:', np.mean(aps))
-    
+
+
+
 
 # TODO:
-# try training with the old augmentation parameters ! 
-    # that includes the parameters within each augmentation function
-    # + 0.5 inference-time dropout
+
+# COLAB:
+# add the correct patient splitting
+# try reinstating the changes to the artefacts
+# try reinstating the stochasticity
+# try validating on a train_mode DataLoader
 
 # export Colab environment
 # make the new inference script pretty
     # including the environment, need to have same keras version as we do
 
-# splitting by patient
 # input size - resampling or sub-volume sampling or registration
 # gradually shift training distribution to real distribution
 # get set up on arc
