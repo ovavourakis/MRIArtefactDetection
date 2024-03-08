@@ -7,7 +7,7 @@ from tensorflow.keras.metrics import AUC
 from tensorflow.keras.callbacks import ModelCheckpoint, ReduceLROnPlateau, EarlyStopping
 from sklearn.model_selection import train_test_split, GroupShuffleSplit
 
-from train_utils import DataCrawler, DataLoader, plot_train_metrics, split_by_patient
+from train_utils import DataCrawler, DataLoader, plot_train_metrics, split_by_patient, PrintModelWeightsNorm
 from model import getConvNet
 
 # Check for GPU availability and set TensorFlow to use GPU if available
@@ -88,6 +88,8 @@ if __name__ == '__main__':
 
     # define callbacks
     callbacks = [
+        # keep an eye on model weights norm after every epoch
+        PrintModelWeightsNorm(),
         # save model after each epoch
         ModelCheckpoint(filepath=checkpoint_dir + "/end_of_epoch_{epoch}.keras"), 
         # reduce learning rate if val_loss doesn't improve for 2 epochs
@@ -138,23 +140,3 @@ if __name__ == '__main__':
         aps.append(AUC(curve='PR')(df['bin_gt'], df[f'y_pred{i}']))
     print('mean AUROC on test:', np.mean(aurocs))
     print('mean AP on test:', np.mean(aps))
-
-
-
-
-# TODO:
-
-# COLAB:
-# add the correct patient splitting
-# try reinstating the changes to the artefacts
-# try reinstating the stochasticity
-# try validating on a train_mode DataLoader
-
-# export Colab environment
-# make the new inference script pretty
-    # including the environment, need to have same keras version as we do
-
-# input size - resampling or sub-volume sampling or registration
-# gradually shift training distribution to real distribution
-# get set up on arc
-# integrate ADNI data

@@ -6,9 +6,27 @@ from keras.utils import Sequence
 from keras.callbacks import Callback
 import matplotlib.pyplot as plt
 
+from sklearn.model_selection import GroupShuffleSplit
+
+class PrintModelWeightsNorm(Callback):
+    def on_epoch_end(self, epoch, logs=None):
+        weights_norm = tf.sqrt(sum(tf.reduce_sum(tf.square(w)) for w in self.model.weights))
+        print(f"Norm of weights after epoch {epoch+1}: {weights_norm.numpy()}")
+
+
 def split_by_patient(real_image_paths, pids, real_labels):
-    ys = [1,0,0]
-    while max(ys)-min(ys)>0.02:
+    # remove patients with only one image
+    pid_counts = {pid:0 for pid in pids}
+    for pid in pids:
+        pid_counts[pid] += 1
+    pids_to_remove = [pid for pid in pid_counts if pid_counts[pid] < 3]
+    
+    real_image_paths = [path for path, pid in zip(real_image_paths, pids) if pid not in pids_to_remove]
+    real_labels = [label for label, pid in zip(real_labels, pids) if pid not in pids_to_remove]
+    pids = [pid for pid in pids if pid not in pids_to_remove]
+
+    artf_frc = [1,0,0]
+    while max(artf_frc)-min(artf_frc)>0.02:
         for trvidx, testidx in GroupShuffleSplit(n_splits=1, test_size=0.1).split(real_image_paths, real_labels, pids):
             Xtrval, Xtest = [real_image_paths[i] for i in trvidx], [real_image_paths[i] for i in testidx]
             ytrval, ytest = [real_labels[i] for i in trvidx], [real_labels[i] for i in testidx]
@@ -23,10 +41,10 @@ def split_by_patient(real_image_paths, pids, real_labels):
         assert len(set(pid_train).intersection(set(pid_test))) == 0
         assert len(set(pid_val).intersection(set(pid_test))) == 0
         assert len(set(pid_train).intersection(set(pid_val))) == 0
-        
-        ys = [sum(y)/len(y) for y in [ytrain, yval, ytest]]
 
-    return Xtrain, Xval, Xtest, ytrain, yval, ytest
+        artf_frc = [sum(y)/len(y) for y in [ytrain, yval, ytest]]
+
+    return Xtrain, Xval, Xtest, np.array(ytrain), np.array(yval), np.array(ytest)
 
 class ImageReader():
     '''
@@ -115,7 +133,6 @@ class ImageReader():
         
          # 4 - Apply the modification on the modified image and return modified version
         modified_img = modification(img)   
-        # modified_img.save(img_path)
         return modified_img
 
     def read_image(self, path):
@@ -154,21 +171,22 @@ class DataCrawler():
         artefacts_img_paths = []
         for d in self.datasets:
             for c in self.image_contrasts:
-                for q in self.image_qualities:
-                    path = os.path.join(self.datadir, d, c, q)
-                    images = os.listdir(path)
-                    img_paths = [os.path.join(path, i) for i in images]
-                    if q == 'clean':
-                        clean_img_paths.extend(img_paths)
-                    else:
-                        artefacts_img_paths.extend(img_paths)
+                if os.path.isdir(os.path.join(self.datadir, d, c)):
+                  for q in self.image_qualities:
+                      path = os.path.join(self.datadir, d, c, q)
+                      images = os.listdir(path)
+                      img_paths = [os.path.join(path, i) for i in images]
+                      if q == 'clean':
+                          clean_img_paths.extend(img_paths)
+                      else:
+                          artefacts_img_paths.extend(img_paths)
         # parse out the subject IDs from the paths
         clean_ids = [p.split('sub-')[1].split('_')[0] for p in clean_img_paths]
         artefacts_ids = [p.split('sub-')[1].split('_')[0] for p in artefacts_img_paths]
         # define the appropriate labels
         num_clean = len(clean_img_paths)
         num_artefacts = len(artefacts_img_paths)
-        y_true = np.array([1]*num_clean + [0]*num_artefacts)
+        y_true = np.array([0]*num_clean + [1]*num_artefacts)
 
         return clean_img_paths + artefacts_img_paths, clean_ids + artefacts_ids, y_true
 
@@ -190,7 +208,7 @@ class DataLoader(Sequence):
         clean_idx, artefact_idx = np.where(y_true == 0)[0], np.where(y_true == 1)[0]
         self.Clean_img_paths = [Xpaths[i] for i in clean_idx]
         self.Artefacts_img_paths = [Xpaths[i] for i in artefact_idx]
-        self.clean_ratio = self._get_clean_ratio()
+        # self.clean_ratio = self._get_clean_ratio()
 
         self.train_mode = train_mode
         if self.train_mode:
@@ -228,7 +246,7 @@ class DataLoader(Sequence):
         
         def _pick_augment(path, aug_type='clean'):
             if aug_type=='clean':
-                aug = '_CAug'
+                aug = 'CAug'
             elif aug_type=='artefact':
                 augs = list(self.target_artef_distro.keys())
                 probs = list(self.target_artef_distro.values())
@@ -309,9 +327,9 @@ class DataLoader(Sequence):
     def __getitem__(self,idx):
         '''Generates the batch, with associated labels.'''
         # read in the images, augment with artefacts as neccessary, then apply pre-processing
-        batch_images = [self.reader.read_image(path) for path in self.batches[idx]]
-        # X = np.stack([np.squeeze(img.data.numpy()) for img in batch_images], axis = 0)
-        # X = np.stack([img.data.numpy() for img in batch_images], axis = 0)
+        # start_time = time.time()
+        batch_images = [self.reader.read_image(path) for path in self.batches[idx]]  # TODO: this takes ~30s for 10-image batch
+        # print(f"Batch image loading time: {time.time() - start_time} seconds")
         X = torch.stack([img.data.permute(1, 2, 3, 0) for img in batch_images])
 
         
