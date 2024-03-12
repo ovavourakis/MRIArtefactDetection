@@ -1,17 +1,17 @@
-import torch, os, random, math
-import numpy as np
-import tensorflow as tf
+import os, random, time
+import numpy as np, matplotlib.pyplot as plt
+
+import torch, tensorflow as tf
 import torchio as tio
+
 from keras.utils import Sequence
 from keras.callbacks import Callback
-import matplotlib.pyplot as plt
-
 from sklearn.model_selection import GroupShuffleSplit
 
 class PrintModelWeightsNorm(Callback):
     def on_epoch_end(self, epoch, logs=None):
         weights_norm = tf.sqrt(sum(tf.reduce_sum(tf.square(w)) for w in self.model.weights))
-        print(f"Norm of weights after epoch {epoch+1}: {weights_norm.numpy()}")
+        print(f"\nNorm of weights after epoch {epoch+1}: {weights_norm.numpy()}")
 
 
 def split_by_patient(real_image_paths, pids, real_labels):
@@ -53,64 +53,63 @@ class ImageReader():
     preprocessing (resizing, normalisation, padding etc.).
     '''
 
-    def __init__(self, input_size=(256,256,64)):
-        self.input_size = input_size
+    def __init__(self, output_size=(192,256,256)):
+        self.output_size = output_size
+
         self.Synths = {
-            "RandomZoom": tio.RandomAffine(scales=(1.5, 1.5)),          # zooming in the images 
-            # "RandomElasticDeformation": tio.RandomElasticDeformation(), # INCORRECT: parameters unchosen; elastic deformation of the images 
+            "RandomAffine": tio.RandomAffine(scales=(1.5, 1.5)),        # zooming in on the images
+            "RandomElasticDeformation": tio.RandomElasticDeformation(), # elastic deformation of the images
             "RandomAnisotropy": tio.RandomAnisotropy(),                 # anisotropic deformation of the images
             "RescaleIntensity": tio.RescaleIntensity((0.5, 1.5)),       # rescaling the intensity of the images
-            "RandomMotion": tio.RandomMotion(degrees = (10,15), translation = (10,15)), # filling the  𝑘 -space with random rigidly-transformed versions of the original images
+            "RandomMotion": tio.RandomMotion(),                         # filling the  𝑘 -space with random rigidly-transformed versions of the original images
             "RandomGhosting": tio.RandomGhosting(),                     # removing every  𝑛 th plane from the k-space
             "RandomSpike": tio.RandomSpike(),                           # signal peak in  𝑘 -space,
-            "RandomBiasField": tio.RandomBiasField(coefficients = (0.3,0.6)), # Magnetic field inhomogeneities in the MRI scanner produce low-frequency intensity distortions in the images
-            "RandomBlur": tio.RandomBlur(std = (0.6,1.1)),              # blurring the images
-            # "RandomNoise": tio.RandomNoise(),                         # INCORRECT: does not work (why ?); adding noise to the images
+            "RandomBiasField": tio.RandomBiasField(),                   # Magnetic field inhomogeneities in the MRI scanner produce low-frequency intensity distortions in the images
+            "RandomBlur": tio.RandomBlur(),                             # blurring the images
+            "RandomNoise": tio.RandomNoise(),                           # adding noise to the images
             "RandomSwap": tio.RandomSwap(),                             # swapping the phase and magnitude of the images
-            "RandomGamma": tio.RandomGamma(log_gamma = (0.25,0.35)),    # intensity of the images
-            "RandomWrapAround" : self.RandomWrapAround                     # wrapping around the images: Aliasing Artifact
+            "RandomGamma": tio.RandomGamma(),                           # intensity of the images
+            # "RandomWrapAround" : self.RandomWrapAround                  # wrapping around the images: Aliasing Artifact
         }
         # pre-processing
         self.orient = tio.transforms.ToCanonical()                  # RAS+ orientation
-        self.normalise = tio.transforms.ZNormalization()            # TODO: consider histogram normalisation instead
-        self.crop_pad = tio.transforms.CropOrPad(self.input_size)   # TODO: consider re-sampling instead, or in addition
+        self.normalise = tio.transforms.ZNormalization()
+        self.crop_pad = tio.transforms.CropOrPad(self.output_size)
         self.preprocess = tio.Compose([self.orient, self.normalise, self.crop_pad])
 
-    def RandomWrapAround(self, subject):
-        """ Wrapping around the images: Aliasing Artifact """
-        modified = subject
-        dim_value = np.random.choice([0, 1, 2]) # Pick the dimension to wrap on
-        side = np.random.choice([0, 1]) # Pick the side we want to add the wrap-around
-        nb_rows = random.randint(subject.shape[dim_value+1]//4, subject.shape[dim_value+1]//3) 
-        if side == 0: # wrap the last rows to the firsts rows
-                if dim_value == 0: modified.data[:, :nb_rows, :, :] += subject.data[:,-nb_rows:, :, :] 
-                elif dim_value == 1: modified.data[:, :, :nb_rows, :] += subject.data[:, :,-nb_rows:, :] 
-                elif dim_value == 2: modified.data[:, :, :, :nb_rows] += subject.data[:, :, :,-nb_rows:]
-        elif side == 1: # wrap the firsts rows to the last rows
-                if dim_value == 0: modified.data[:,-nb_rows:, :, :] += subject.data[:, :nb_rows, :, :] 
-                elif dim_value == 1: modified.data[:, :,-nb_rows:, :] += subject.data[:, :, :nb_rows, :] 
-                elif dim_value == 2: modified.data[:, :, :, -nb_rows:] += subject.data[:, :, :, :nb_rows]
-        return modified
+    # def RandomWrapAround(self, subject):
+    #     """ Wrapping around the images: Aliasing Artefact """
+    #     modified = subject
+    #     dim_value = np.random.choice([0, 1, 2]) # Pick the dimension to wrap on
+    #     side = np.random.choice([0, 1]) # Pick the side we want to add the wrap-around
+    #     nb_rows = random.randint(subject.shape[dim_value+1]//4, subject.shape[dim_value+1]//3) 
+    #     if side == 0: # wrap the last rows to the firsts rows
+    #             if dim_value == 0: modified.data[:, :nb_rows, :, :] += subject.data[:,-nb_rows:, :, :] 
+    #             elif dim_value == 1: modified.data[:, :, :nb_rows, :] += subject.data[:, :,-nb_rows:, :] 
+    #             elif dim_value == 2: modified.data[:, :, :, :nb_rows] += subject.data[:, :, :,-nb_rows:]
+    #     elif side == 1: # wrap the firsts rows to the last rows
+    #             if dim_value == 0: modified.data[:,-nb_rows:, :, :] += subject.data[:, :nb_rows, :, :] 
+    #             elif dim_value == 1: modified.data[:, :,-nb_rows:, :] += subject.data[:, :, :nb_rows, :] 
+    #             elif dim_value == 2: modified.data[:, :, :, -nb_rows:] += subject.data[:, :, :, :nb_rows]
+    #     return modified
  
-
     def _apply_modifications(self, img_path):
         # 1 - Checking the extension on the img_path + storing it as extension_name (i.e the modification to apply)
-        extensions = ["CAug", "RandomZoom", 
-          'RandomAnisotropy', 'RescaleIntensity', 'RandomMotion', 'RandomGhosting', 'RandomSpike', 
-          'RandomBiasField', 'RandomBlur', 'RandomSwap', 'RandomGamma', 'RandomWrapAround']
+        extensions = ["CAug", "RandomAffine", 'RandomElasticDeformation',
+          'RandomAnisotropy', 'RescaleIntensity', 'RandomMotion', 'RandomGhosting', 'RandomSpike',
+          'RandomBiasField', 'RandomBlur', 'RandomNoise','RandomSwap', 'RandomGamma']#, 'RandomWrapAround']
         extension_name = None 
         for extension in extensions:
             if extension in img_path:
                 extension_name = extension
                 break
         
-         # 2 - Creating a torchIO image from the path
+        # 2 - Creating a torchIO image from the path
         if extension_name is None: # no modification to be applied
-            img = tio.ScalarImage(img_path)
-            return img
-        stripped_img_path = img_path.replace(f"_{extension_name}.nii", ".nii")   
+            return tio.ScalarImage(img_path)
+        stripped_img_path = img_path.replace(f"_{extension_name}.nii", ".nii")
         img = tio.ScalarImage(stripped_img_path)
-        
+
         # 3 - Defining the modification from extension_name
         if extension_name == "CAug":
             binary_flip = [np.random.choice([0, 1]) for _ in range(3)]
@@ -118,27 +117,23 @@ class ImageReader():
             flipping = tio.RandomFlip(axes=idx_flip, flip_probability=1)
             scaling = tio.RandomAffine(scales=(0.1)) # If only one value: U(1-x, 1+x)
             shifting = tio.RandomAffine(translation=(0.1)) # If only one value: U(-x, x)
-            rotating = tio.RandomAffine(degrees=(10)) # If only one value: U(-x, x) 
+            rotating = tio.RandomAffine(degrees=(10)) # If only one value: U(-x, x)
             modification = tio.Compose([flipping, scaling, shifting, rotating])
 
-        elif extension_name in ["RandomZoom", 
-                                'RandomAnisotropy', 'RescaleIntensity', 
-                                'RandomMotion', 'RandomGhosting', 'RandomSpike', 
-                                'RandomBiasField', 'RandomBlur', 
-                                'RandomSwap', 'RandomGamma', 'RandomWrapAround']:
+        elif extension_name in ["RandomAffine", 'RandomElasticDeformation', 'RandomAnisotropy', 'RescaleIntensity',
+                                'RandomMotion', 'RandomGhosting', 'RandomSpike', 'RandomBiasField', 'RandomBlur',
+                                'RandomNoise','RandomSwap', 'RandomGamma']:#, 'RandomWrapAround']:
             modification = self.Synths[extension_name]
-        
+
         else:
             raise ValueError(f"Path extension (augmentation) {extension_name} not recognised")
         
-         # 4 - Apply the modification on the modified image and return modified version
-        modified_img = modification(img)   
-        return modified_img
+        # 4 - Apply the modification on the modified image and return modified version
+        return modification(img)
 
     def read_image(self, path):
         img = self._apply_modifications(path) # introduce artefacts, if specified in path_name
-        img = self.preprocess(img) # re-orient, normalise, crop/pad
-        return img # numpy array
+        return self.preprocess(img).tensor    # re-orient, normalise, crop/pad
 
 class DataCrawler():
     """
@@ -196,19 +191,19 @@ class DataLoader(Sequence):
     Pre-defines augmentations to be performed in order to reach a target clean-ratio.
     """
 
-    def __init__(self, Xpaths, y_true, batch_size, 
+    def __init__(self, Xpaths, y_true, batch_size, image_shape,
                   train_mode=True, target_clean_ratio=None, artef_distro=None):
         self._check_inputs(Xpaths, y_true, artef_distro, target_clean_ratio, train_mode)
 
         self.batch_size = batch_size
+        self.image_shape = image_shape
         self.num_classes = len(np.unique(y_true))
-        self.reader = ImageReader(input_size=(256,256,64))
+        self.reader = ImageReader(output_size=self.image_shape)
         
         # paths to just the *real* images
         clean_idx, artefact_idx = np.where(y_true == 0)[0], np.where(y_true == 1)[0]
         self.Clean_img_paths = [Xpaths[i] for i in clean_idx]
         self.Artefacts_img_paths = [Xpaths[i] for i in artefact_idx]
-        # self.clean_ratio = self._get_clean_ratio()
 
         self.train_mode = train_mode
         if self.train_mode:
@@ -228,10 +223,9 @@ class DataLoader(Sequence):
             assert(np.allclose(sum(artef_distro.values()), 1))
             for k, v in artef_distro.items():
                 assert(v >= 0)
-                assert(k in ['RandomZoom', 
-                            'RandomAnisotropy', 'RescaleIntensity', 'RandomMotion', 'RandomGhosting', 
-                            'RandomSpike', 'RandomBiasField', 'RandomBlur', 
-                            'RandomSwap', 'RandomGamma', 'RandomWrapAround'])
+                assert(k in ['RandomAffine', 'RandomElasticDeformation', 'RandomAnisotropy', 'RescaleIntensity',
+                            'RandomMotion', 'RandomGhosting', 'RandomSpike', 'RandomBiasField', 'RandomBlur',
+                            'RandomNoise', 'RandomSwap', 'RandomGamma'])#, 'RandomWrapAround'])
 
     def _get_clean_ratio(self):
         # calculate fraction of clean images (among non-synthetic data)
@@ -255,7 +249,6 @@ class DataLoader(Sequence):
                 raise ValueError('aug_type must be either "clean" or "artefact"')
             dir, file = os.path.split(path)
             fname, ext = file.split('.', 1) # just the first dot, so we don't split extensions like .nii.gz
-            print(dir, fname, aug, ext)
             return os.path.join(dir, fname) + '_' + aug + '.' + ext
         
         clean_ratio, cleans, total = self._get_clean_ratio()
@@ -272,7 +265,7 @@ class DataLoader(Sequence):
         elif clean_ratio > self.target_clean_ratio:
             # create synthetic artefacts until desired clean-ratio is reached
             # pick aigmentations from categorcical distro over transform functions of TorchIO
-            num_imgs_to_aug = cleans/self.target_clean_ratio - total
+            num_imgs_to_aug = int(cleans/self.target_clean_ratio - total)
             imgs_to_aug = random.choices(clean_img_paths, k=num_imgs_to_aug)
             augmented_paths = [_pick_augment(path, aug_type='artefact') for path in imgs_to_aug]
             artefacts_img_paths.extend(augmented_paths)
@@ -291,7 +284,7 @@ class DataLoader(Sequence):
         
         if self.train_mode: 
             # 1 - Decide on number of clean and artefact images in each batch with the repartition we target
-            num_clean = int(self.batch_size * self.target_clean_ratio )
+            num_clean = int(self.batch_size * self.target_clean_ratio)
             num_artefacts = self.batch_size - num_clean
 
             # 2 - Randomly assign the paths to the batches along with their labels
@@ -327,12 +320,11 @@ class DataLoader(Sequence):
     def __getitem__(self,idx):
         '''Generates the batch, with associated labels.'''
         # read in the images, augment with artefacts as neccessary, then apply pre-processing
-        # start_time = time.time()
+        start_time = time.time()
         batch_images = [self.reader.read_image(path) for path in self.batches[idx]]  # TODO: this takes ~30s for 10-image batch
-        # print(f"Batch image loading time: {time.time() - start_time} seconds")
-        X = torch.stack([img.data.permute(1, 2, 3, 0) for img in batch_images])
+        print(f"Batch image loading time: {time.time() - start_time} seconds")
+        X = torch.stack([img.data.permute(1, 2, 3, 0) for img in batch_images]) # put channel dimension last, then stack along new batch dimension (first)
 
-        
         # also get appropriate labels
         y_true = self.labels[idx]
         y_one_hot = tf.one_hot(y_true, depth=self.num_classes)
