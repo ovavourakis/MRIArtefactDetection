@@ -1,3 +1,7 @@
+'''
+    Helper classes and functions for model training. 
+'''
+
 import os, random, time
 import numpy as np, matplotlib.pyplot as plt
 
@@ -9,12 +13,26 @@ from keras.callbacks import Callback
 from sklearn.model_selection import GroupShuffleSplit
 
 class PrintModelWeightsNorm(Callback):
+    """
+    Keras callback to print the norm of the weights at the end of each epoch.
+    """
     def on_epoch_end(self, epoch, logs=None):
         weights_norm = tf.sqrt(sum(tf.reduce_sum(tf.square(w)) for w in self.model.weights))
         print(f"\nNorm of weights after epoch {epoch+1}: {weights_norm.numpy()}")
 
 
 def split_by_patient(real_image_paths, pids, real_labels):
+    """
+    Splits image data by patient ID into training, validation, and test sets.
+    
+    Args:
+        real_image_paths (list): Paths to the images.
+        pids (list): Corresponding patient IDs for each image.
+        real_labels (list): Labels for each image.
+        
+    Returns:
+        tuple: Tuple containing training, validation, and test sets (Xtrain, Xval, Xtest, ytrain, yval, ytest).
+    """
     # remove patients with only one image
     pid_counts = {pid:0 for pid in pids}
     for pid in pids:
@@ -47,12 +65,11 @@ def split_by_patient(real_image_paths, pids, real_labels):
     return Xtrain, Xval, Xtest, np.array(ytrain), np.array(yval), np.array(ytest)
 
 class ImageReader():
-    '''
+    """
     Class to read and preprocess images from disk.
-    Handles image loading, synthetic augmentation and 
-    preprocessing (resizing, normalisation, padding etc.).
-    '''
-
+    
+    Handles image loading, synthetic augmentation, and preprocessing (resizing, normalization, padding, etc.).
+    """
     def __init__(self, output_size=(192,256,256)):
         self.output_size = output_size
 
@@ -77,23 +94,16 @@ class ImageReader():
         self.crop_pad = tio.transforms.CropOrPad(self.output_size)
         self.preprocess = tio.Compose([self.orient, self.normalise, self.crop_pad])
 
-    # def RandomWrapAround(self, subject):
-    #     """ Wrapping around the images: Aliasing Artefact """
-    #     modified = subject
-    #     dim_value = np.random.choice([0, 1, 2]) # Pick the dimension to wrap on
-    #     side = np.random.choice([0, 1]) # Pick the side we want to add the wrap-around
-    #     nb_rows = random.randint(subject.shape[dim_value+1]//4, subject.shape[dim_value+1]//3) 
-    #     if side == 0: # wrap the last rows to the firsts rows
-    #             if dim_value == 0: modified.data[:, :nb_rows, :, :] += subject.data[:,-nb_rows:, :, :] 
-    #             elif dim_value == 1: modified.data[:, :, :nb_rows, :] += subject.data[:, :,-nb_rows:, :] 
-    #             elif dim_value == 2: modified.data[:, :, :, :nb_rows] += subject.data[:, :, :,-nb_rows:]
-    #     elif side == 1: # wrap the firsts rows to the last rows
-    #             if dim_value == 0: modified.data[:,-nb_rows:, :, :] += subject.data[:, :nb_rows, :, :] 
-    #             elif dim_value == 1: modified.data[:, :,-nb_rows:, :] += subject.data[:, :, :nb_rows, :] 
-    #             elif dim_value == 2: modified.data[:, :, :, -nb_rows:] += subject.data[:, :, :, :nb_rows]
-    #     return modified
- 
     def _apply_modifications(self, img_path):
+        """
+        Applies synthetic modifications to an image based on its path.
+        
+        Args:
+            img_path (str): Path to the image.
+            
+        Returns:
+            tio.ScalarImage: Modified image.
+        """
         # 1 - Checking the extension on the img_path + storing it as extension_name (i.e the modification to apply)
         extensions = ["CAug", "RandomAffine", 'RandomElasticDeformation',
           'RandomAnisotropy', 'RescaleIntensity', 'RandomMotion', 'RandomGhosting', 'RandomSpike',
@@ -132,16 +142,32 @@ class ImageReader():
         return modification(img)
 
     def read_image(self, path):
+        """
+        Reads, augments, and preprocesses an image from a given path.
+        
+        Args:
+            path (str): Path to the image.
+            
+        Returns:
+            torch.Tensor: Augmented (if pre-specified) and preprocessed image tensor.
+        """
         img = self._apply_modifications(path) # introduce artefacts, if specified in path_name
         return self.preprocess(img).tensor    # re-orient, normalise, crop/pad
 
 class DataCrawler():
     """
-    Crawls the dataset directories and returns a list of clean/artefact 
-    image paths with labels.
+    Crawls the dataset directories and returns a list of clean/artefact image paths with labels.
     """
-
     def __init__(self, datadir, datasets, image_contrasts, image_qualities):
+        """
+        Initializes the DataCrawler with dataset parameters.
+        
+        Args:
+            datadir (str): Base directory of the dataset.
+            datasets (list): List of dataset names to include.
+            image_contrasts (list): List of image contrast types to include. Can be any number of ['T1wMPR', 'T1wTIR', 'T2w', 'T2starw', 'FLAIR'].
+            image_qualities (list): List of image quality types to include. Must include both ['clean', 'exp_artefacts'].
+        """
         self._check_inputs(datadir, datasets, image_contrasts, image_qualities)
         self.datadir = datadir
         self.datasets = datasets
@@ -149,6 +175,15 @@ class DataCrawler():
         self.image_qualities = image_qualities
        
     def _check_inputs(self, datadir, datasets, image_contrasts, image_qualities):
+        """
+        Checks the validity of the input parameters.
+        
+        Args:
+            datadir (str): Base directory of the dataset.
+            datasets (list): List of dataset names to include.
+            image_contrasts (list): List of image contrast types to include. Can be any number of ['T1wMPR', 'T1wTIR', 'T2w', 'T2starw', 'FLAIR'].
+            image_qualities (list): List of image quality types to include. Must be in ['clean', 'exp_artefacts'].
+        """
         # do paths to all requested types of images exist?
         assert(os.path.isdir(datadir))
         for d in datasets:
@@ -161,6 +196,12 @@ class DataCrawler():
                         assert(os.path.isdir(os.path.join(datadir, c, q)))
 
     def crawl(self):
+        """
+        Crawls the dataset directories and returns lists of image paths and labels.
+        
+        Returns:
+            tuple: Tuple containing lists of image paths, patient IDs, and labels.
+        """
         # get all the (non-synthetic) image paths
         clean_img_paths = []
         artefacts_img_paths = []
@@ -187,12 +228,25 @@ class DataCrawler():
 
 class DataLoader(Sequence):
     """
-    Dataloader for an image dataset.
-    Pre-defines augmentations to be performed in order to reach a target clean-ratio.
+    DataLoader for an image dataset.
+    Coordinates file reading, augmentation, pre-processing, batching and passing to the model.
+    
+    Pre-defines augmentations to be performed in order to reach a target ratio of clean images to artefact-images, if this differs from the underlying dataset.
     """
-
     def __init__(self, Xpaths, y_true, batch_size, image_shape,
                   train_mode=True, target_clean_ratio=None, artef_distro=None):
+        """
+        Initializes the DataLoader with the given parameters, checks the validity of inputs, and prepares the dataset for training or evaluation.
+
+        Args:
+            Xpaths (list): List of paths to the image files.
+            y_true (numpy.ndarray): Array of corresponding ground truth labels corresponding to the images.
+            batch_size (int): Number of images per batch.
+            image_shape (tuple): The shape to which images should be cropped/padded.
+            train_mode (bool, optional): Specifies whether the DataLoader is in training mode. Defaults to True (in which case synthetic image augmentations can be performed).
+            target_clean_ratio (float, optional): The desired ratio of clean images to images with artefacts in the dataset. Only relevant in training mode. Defaults to None.
+            artef_distro (dict, optional): Distribution of artefact types for generating synthetic artefact images. Only relevant in training mode. Defaults to None.
+        """
         self._check_inputs(Xpaths, y_true, artef_distro, target_clean_ratio, train_mode)
 
         self.batch_size = batch_size
@@ -214,6 +268,16 @@ class DataLoader(Sequence):
         self.clean_img_paths, self.artefacts_img_paths, self.batches, self.labels = self.on_epoch_end()
 
     def _check_inputs(self, Xpaths, y_true, artef_distro, target_clean_ratio, train_mode):
+        """
+        Checks the validity of the input parameters for DataLoader.
+        
+        Args:
+            Xpaths (list): Paths to the images.
+            y_true (list): Labels for each image.
+            artef_distro (dict): Distribution of artefact types for augmentation.
+            target_clean_ratio (float): Target ratio of clean images.
+            train_mode (bool): Whether the loader is in training mode.
+        """
         assert(len(Xpaths) == len(y_true))
         assert(len(np.unique(y_true)) == 2)
         if train_mode:
@@ -228,17 +292,27 @@ class DataLoader(Sequence):
                             'RandomNoise', 'RandomSwap', 'RandomGamma'])#, 'RandomWrapAround'])
 
     def _get_clean_ratio(self):
-        # calculate fraction of clean images (among non-synthetic data)
+        """
+        Calculates fraction of clean images (among non-synthetic data)
+        """
         C = len(self.Clean_img_paths)
         T = C + len(self.Artefacts_img_paths)
         return C/T, C, T
     
     def _define_augmentations(self):
-        '''Generates pathnames for synthetic images to be created in order to reach target clean-ratio.
+        """
+        Pre-defines augmentations to be performed on specific images in otder to reach a target ratio of clean images to artefact-images.
+        Desired augmentations are appended to the image path, in a format that can be parsed by `ImageReader`.
+
+        If the required augmentations are synthetic artefacts, these are drawn from a categorical distro over image transforms given to the constructor.
         Synthetic clean images defined by random {flips, shifts, scales, rotations}.
-        Synthetic artefact images defined by transforms drawn from a categorical distro over artefact types.'''
-        
+        """
+
         def _pick_augment(path, aug_type='clean'):
+            """
+            Defines which augmentation will be performed for a given image and appends it to the image path. 
+            Artefacts are randomly drawn from a pre-specified distribution.
+            """
             if aug_type=='clean':
                 aug = 'CAug'
             elif aug_type=='artefact':
@@ -273,13 +347,16 @@ class DataLoader(Sequence):
         return clean_img_paths, artefacts_img_paths
 
     def __len__(self):
+        """
+        Returns the number of batches in the current epoch.
+        """
         return len(self.batches)
 
     def _def_batches(self, clean_img_paths, artefacts_img_paths):
-        """ Determine batches at start of each epoch:
-        Assign to batches the paths with the repartition we target
-        Makes sure target clean-ratio is maintained in each batch
-        Makes sure all the existing images are used in the epoch
+        """ 
+        Pre-determines batches at start of each epoch; images are not read from disk until __getitem__() is called.
+
+        Ensures that the desired ratio of clean images to artefacts (synthetic or not) is reflected in each batch.
         """
         
         if self.train_mode: 
@@ -318,7 +395,10 @@ class DataLoader(Sequence):
         return batches, labels
 
     def __getitem__(self,idx):
-        '''Generates the batch, with associated labels.'''
+        """
+        Generates the batch with batch-index `idx`, alongside associated labels.
+        Images are read from disk, any pre-specified augmentations and pre-processing is applied and the result passed ot the model.
+        """
         # read in the images, augment with artefacts as neccessary, then apply pre-processing
         start_time = time.time()
         batch_images = [self.reader.read_image(path) for path in self.batches[idx]]  # TODO: this takes ~30s for 10-image batch
@@ -332,6 +412,10 @@ class DataLoader(Sequence):
         return X, y_one_hot
     
     def on_epoch_end(self):
+        """
+        Re-defines new augmentations for the next epoch (if in train mode).
+        Re-defines new batches for next epoch.
+        """
          # get paths to all images, including synthetic ones, if requested
         if self.train_mode:
             # re-define augmentations to do for next epoch
@@ -344,7 +428,9 @@ class DataLoader(Sequence):
         return self.clean_img_paths, self.artefacts_img_paths, self.batches, self.labels
     
 def plot_train_metrics(history, filename):
-    '''Plot the training metrics'''
+    """
+    Plot training metrics: training loss, accuracy, AUROC, AUPRC.
+    """
 
     # Plotting 4x4 metrics
     fig, axs = plt.subplots(2, 2, figsize=(15, 10))

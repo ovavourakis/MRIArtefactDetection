@@ -1,3 +1,7 @@
+'''
+    Script to train the model.
+'''
+
 # IMPORTS
 import os, numpy as np, pandas as pd
 from train_utils import *
@@ -6,14 +10,6 @@ from model import *
 import tensorflow as tf, keras
 from tensorflow.keras.metrics import AUC
 from tensorflow.keras.callbacks import ModelCheckpoint, ReduceLROnPlateau, EarlyStopping
-
-# GPU
-physical_devices = tf.config.list_physical_devices('GPU')
-if len(physical_devices) > 0:
-    tf.config.experimental.set_memory_growth(physical_devices[0], True)
-    print("Using GPU\n")
-else:
-    print("Using CPU\n")
 
 # CONSTANTS
 SAVEDIR = '~/trainrun'
@@ -39,6 +35,16 @@ ARTEFACT_DISTRO = {
 
 MC_RUNS = 20  # number of Monte Carlo runs on test set
 
+# ENABLE GPU IF PRESENT
+physical_devices = tf.config.list_physical_devices('GPU')
+if len(physical_devices) > 0:
+    tf.config.experimental.set_memory_growth(physical_devices[0], True)
+    print("Using GPU\n")
+else:
+    print("Using CPU\n")
+
+
+
 if __name__ == '__main__':
     
     os.makedirs(SAVEDIR, exist_ok=True)
@@ -46,7 +52,7 @@ if __name__ == '__main__':
     # get the paths and labels of the real images
     real_image_paths, pids, real_labels = DataCrawler(DATADIR, DATASETS, CONTRASTS, QUALS).crawl()
 
-    # split by patient
+    # split images by patient id
     Xtrain, Xval, Xtest, ytrain, yval, ytest = split_by_patient(real_image_paths, pids, real_labels)
 
     for string, y in zip(['train', 'val', 'test'], [ytrain, yval, ytest]):
@@ -67,7 +73,7 @@ if __name__ == '__main__':
     test_images = [file for sublist in testloader.batches for file in sublist]
     y_true_test = [y for sublist in testloader.labels for y in sublist]
     out = pd.DataFrame({'image': test_images, 'bin_gt': y_true_test}).groupby('image').agg({'bin_gt': 'first'})
-    out.to_csv(SAVEDIR+'test_split_gt.tsv', sep='\t')
+    out.to_csv(os.path.join(SAVEDIR, 'test_split_gt.tsv'), sep='\t')
 
     # compile model
     model = getConvNet(out_classes=2, input_shape=(192,256,256,1))
@@ -99,8 +105,8 @@ if __name__ == '__main__':
     # train model
     history = model.fit(trainloader, 
                         validation_data=valloader,
-                        use_multiprocessing=True,
-                        workers=2,
+                        # use_multiprocessing=True,
+                        # workers=2,
                         steps_per_epoch=1, #130,       # batches per epoch
                         epochs=24,                 # number of epochs
                         callbacks=callbacks)
@@ -123,8 +129,7 @@ if __name__ == '__main__':
     print("Evaluate on Test Set")
     print("#"*30)
     # predict on test set, and write out results
-    y_pred = model.predict(testloader, 
-                           use_multiprocessing=True)
+    y_pred = model.predict(testloader)#, use_multiprocessing=True)
     df = pd.DataFrame({'image': test_images, 
                        'bin_gt': y_true_test, 
                        'y_pred': y_pred[:,1]})
