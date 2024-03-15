@@ -61,13 +61,13 @@ if __name__ == '__main__':
 
     # instantiate DataLoaders
     trainloader = DataLoader(Xtrain, ytrain, train_mode=True,
-                            image_shape = (192,256,256), batch_size=2,
+                            image_shape = (192,256,256), batch_size=10,
                             target_clean_ratio=0.5, artef_distro=ARTEFACT_DISTRO)
     valloader = DataLoader(Xval, yval, train_mode=False,
-                        batch_size=8, image_shape = (192,256,256))
+                        batch_size=15, image_shape = (192,256,256))
     testloader = DataLoader(Xtest*MC_RUNS, np.array(ytest.tolist()*MC_RUNS),
                             train_mode=False,
-                            batch_size=8, image_shape = (192,256,256))
+                            batch_size=15, image_shape = (192,256,256))
 
     # write out ground truth for test set
     test_images = [file for sublist in testloader.batches for file in sublist]
