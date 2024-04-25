@@ -37,8 +37,8 @@ The model was modified slightly from the original specification, then re-impleme
 Training data was taken from:
 
 * Nárai, Á., Hermann, P., Auer, T. et al. (2022) [[paper](https://doi.org/10.1038/s41597-022-01694-8), [dataset](doi:10.18112/openneuro.ds004173.v1.0.2)]
-* Pardoe, H. R., Martin, S. P. (2021) [[dataset](doi:10.18112/openneuro.ds003639.v1.0.0)]
-* Eichhorn, H. et. al. (2022) [[preprint](https://doi.org/10.31234/osf.io/vzh4g), [dataset](doi:10.18112/openneuro.ds003639.v1.0.0)]
+* Pardoe, H. R., Martin, S. P. (2021) [dataset](doi:10.18112/openneuro.ds003639.v1.0.0)
+* Eichhorn, H. et. al. (2022) [preprint](https://doi.org/10.31234/osf.io/vzh4g), [dataset](doi:10.18112/openneuro.ds003639.v1.0.0)
 
 This work was very kindly supported by GE Healthcare.
 
