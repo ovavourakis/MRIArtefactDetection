@@ -19,7 +19,7 @@ A convolutional neural network to detect the presence of acquisition artefacts i
 mamba create -n mri python=3.10.4 pip
 mamba activate mri
 ```
-3. Install `tensorflow` and `pytorch` with GPU acceleration into the environment, along with the usual suspects, and `torchio` for reading and modifying MRI volumes.
+3. Install the usual suspects, along with `tensorflow` and `pytorch` with GPU acceleration into the environment, as well as and `torchio` for reading and modifying MRI volumes.
 
 ```
 mamba install tensorflow-gpu
