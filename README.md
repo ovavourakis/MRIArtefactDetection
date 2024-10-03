@@ -5,7 +5,7 @@ A convolutional neural network to detect the presence of acquisition artefacts i
 ## Repository Structure
 
 * `training`: train the model on a dataset and perform inference on the test-set
-* `inference`: perform inference on a dataset using pre-trained weights
+* `inference`: perform inference on a test dataset using pre-trained weights
 * `evaluation`: evaluate model performance on test set
 * `deprecated`: older scripts for future reference
 
@@ -19,10 +19,16 @@ A convolutional neural network to detect the presence of acquisition artefacts i
 mamba create -n mri python=3.10.4 pip
 mamba activate mri
 ```
-3. Install the usual suspects, along with `tensorflow` and `pytorch` with GPU acceleration into the environment, as well as and `torchio` for reading and modifying MRI volumes.
+
+3. Install GPU-accelerated tensorflow. We recommend doing so via `pip`, as per the [official instructions](https://www.tensorflow.org/install/pip):
 
 ```
-mamba install tensorflow-gpu
+python3 -m pip install tensorflow[and-cuda]
+```
+
+4. Complete the environment with a few more libraries, inlcuding `torchio` for reading and modifying MRI volumes.
+
+```
 mamba install pytorch torchvision torchaudio pytorch-cuda -c pytorch -c nvidia
 mamba install torchio
 mamba install numpy matplotlib scikit-learn keras pandas seaborn tqdm
@@ -36,12 +42,8 @@ This project was originally forked from [this repository](https://github.com/AS-
 The model was modified slightly from the original specification, then re-implemented and re-trained from scratch.
 Training data was taken from:
 
-* Nárai, Á., Hermann, P., Auer, T. et al. (2022) [[paper](https://doi.org/10.1038/s41597-022-01694-8), [dataset](doi:10.18112/openneuro.ds004173.v1.0.2)]
-* Pardoe, H. R., Martin, S. P. (2021) [dataset](doi:10.18112/openneuro.ds003639.v1.0.0)
-* Eichhorn, H. et. al. (2022) [preprint](https://doi.org/10.31234/osf.io/vzh4g), [dataset](doi:10.18112/openneuro.ds003639.v1.0.0)
+* Nárai, Á., Hermann, P., Auer, T. et al. (2022) [[paper](https://doi.org/10.1038/s41597-022-01694-8), [dataset](https://doi.org/10.18112/openneuro.ds004173.v1.0.2)]
+* Pardoe, H. R., Martin, S. P. (2021) [dataset](https://doi.org/10.18112/openneuro.ds003639.v1.0.0)
+* Eichhorn, H. et. al. (2022) [preprint](https://doi.org/10.31234/osf.io/vzh4g), [dataset](https://doi.org/10.18112/openneuro.ds003639.v1.0.0)
 
 This work was very kindly supported by GE Healthcare.
-
-
-
-
