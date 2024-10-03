@@ -8,9 +8,6 @@ import torch, os, sys, keras, pandas as pd, numpy as np
 import tensorflow as tf
 from keras.metrics import AUC
 
-    # TODO this import doesnt work
-# sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-# sys.path.append(os.path.join('..', 'training'))
 from training.train_utils import DataLoader
 
 TRAINRUN_DIR = '/vols/opig/users/vavourakis/ge_project/trainrun/'
