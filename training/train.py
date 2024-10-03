@@ -8,12 +8,12 @@ from train_utils import *
 from model import *
 
 import tensorflow as tf, keras
-from tensorflow.keras.metrics import AUC
-from tensorflow.keras.callbacks import ModelCheckpoint, ReduceLROnPlateau, EarlyStopping
+from keras.metrics import AUC
+from keras.callbacks import ModelCheckpoint, ReduceLROnPlateau, EarlyStopping
 
 # CONSTANTS
-SAVEDIR = '~/trainrun'
-DATADIR = '/data/dtce-eciqc/ball6433/struc_data'
+SAVEDIR = '/vols/opig/users/vavourakis/ge_project/trainrun'
+DATADIR = '/data/nagagpu04/not-backed-up/nvme00/vavourakis/struc_data'
 DATASETS = ['artefacts'+str(i) for i in [1,2,3]]
 CONTRASTS = ['T1wMPR']#, 'T1wTIR', 'T2w', 'T2starw', 'FLAIR']
 QUALS = ['clean', 'exp_artefacts']
@@ -33,6 +33,7 @@ ARTEFACT_DISTRO = {
     'RandomGamma' : 1/12
 }
 
+TARGET_CLEAN_RATIO = 0.5 # re-sample training set to this fraction of clean images
 MC_RUNS = 20  # number of Monte Carlo runs on test set
 
 # ENABLE GPU IF PRESENT
@@ -62,7 +63,7 @@ if __name__ == '__main__':
     # instantiate DataLoaders
     trainloader = DataLoader(Xtrain, ytrain, train_mode=True,
                             image_shape = (192,256,256), batch_size=10,
-                            target_clean_ratio=0.5, artef_distro=ARTEFACT_DISTRO)
+                            target_clean_ratio=TARGET_CLEAN_RATIO, artef_distro=ARTEFACT_DISTRO)
     valloader = DataLoader(Xval, yval, train_mode=False,
                         batch_size=15, image_shape = (192,256,256))
     testloader = DataLoader(Xtest*MC_RUNS, np.array(ytest.tolist()*MC_RUNS),
@@ -94,7 +95,7 @@ if __name__ == '__main__':
         # keep an eye on model weights norm after every epoch
         PrintModelWeightsNorm(),
         # save model after each epoch
-        ModelCheckpoint(filepath=os.path.join(checkpoint_dir, "/end_of_epoch_{epoch}.keras")), 
+        ModelCheckpoint(filepath=os.path.join(checkpoint_dir, "end_of_epoch_{epoch}.keras")), 
         # reduce learning rate if val_loss doesn't improve for 2 epochs
         ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=2, mode='auto',
                           min_delta=1e-2, cooldown=0, min_lr=0.0001),
@@ -105,10 +106,8 @@ if __name__ == '__main__':
     # train model
     history = model.fit(trainloader, 
                         validation_data=valloader,
-                        # use_multiprocessing=True,
-                        # workers=2,
                         steps_per_epoch=1, #130,       # batches per epoch
-                        epochs=24,                 # number of epochs
+                        epochs=1,#24,                 # number of epochs
                         callbacks=callbacks)
     
     # save metrics
@@ -117,10 +116,10 @@ if __name__ == '__main__':
         'val_loss': history.history['val_loss'],
         'train_accuracy': history.history['accuracy'],
         'val_accuracy': history.history['val_accuracy'],
-        'train_auc': history.history['auc'],
-        'val_auc': history.history['val_auc'],
-        'train_ap': history.history['auc_1'],
-        'val_ap': history.history['val_auc_1']
+        'train_auc': history.history['auroc'],
+        'val_auc': history.history['val_auroc'],
+        'train_ap': history.history['auprc'],
+        'val_ap': history.history['val_auprc']
     }).to_csv(os.path.join(SAVEDIR, 'training_metrics.tsv'), sep='\t')
     plot_train_metrics(history, os.path.join(SAVEDIR, 'train_metrics_plot.png'))
 
