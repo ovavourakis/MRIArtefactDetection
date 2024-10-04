@@ -106,8 +106,8 @@ if __name__ == '__main__':
     # train model
     history = model.fit(trainloader, 
                         validation_data=valloader,
-                        steps_per_epoch=1, #130,       # batches per epoch
-                        epochs=1,#24,                 # number of epochs
+                        steps_per_epoch=130,           # batches per epoch
+                        epochs=24,                     # number of epochs
                         callbacks=callbacks)
     
     # save metrics
